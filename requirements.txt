@@ -1,0 +1,35 @@
+# ============================================
+# 量华量化交易平台 - Python 依赖
+# ============================================
+# 安装命令: pip install -r requirements.txt
+# ============================================
+
+# ---- Web 后端框架 ----
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+
+# ---- 数据库 ----
+PyMySQL>=1.1.0
+DBUtils>=3.0.0
+
+# ---- HTTP 请求 ----
+requests>=2.31.0
+aiohttp>=3.9.0
+aiomysql>=0.2.0
+
+# ---- 行情/数据采集 ----
+akshare>=1.14.0
+mootdx>=0.5.0
+
+# ---- 定时任务 ----
+schedule>=1.2.0
+APScheduler>=3.10.0
+chinese-calendar>=1.9.0
+
+# ---- FinBERT 情感分析（可选，体积较大约 500MB）----
+# 如不需要本地情感分析模型，可注释掉下面 4 行
+torch>=2.0.0
+numpy>=1.24.0
+transformers>=4.37.0
+huggingface-hub>=0.20.0

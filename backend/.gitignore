@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# 私密配置（密码、API Key）
+config/.env
+.env
+
+# 日志
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

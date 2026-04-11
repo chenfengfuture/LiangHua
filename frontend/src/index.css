@@ -1,0 +1,71 @@
+/* ── CSS 变量主题系统 ─────────────────────────────────────────────────
+   所有主题变量通过 JS 动态写入 :root，这里是默认「暗夜」主题的兜底值
+──────────────────────────────────────────────────────────────────── */
+:root {
+  /* 背景层次 */
+  --bg-base:      #0d1117;   /* 页面最底层背景 */
+  --bg-surface:   #161b22;   /* 卡片/导航背景 */
+  --bg-elevated:  #21262d;   /* 悬浮/次级背景 */
+  --bg-input:     #0d1117;   /* 输入框背景 */
+
+  /* 边框 */
+  --border:       #21262d;
+  --border-muted: #30363d;
+
+  /* 文字 */
+  --text-primary:  #f0f6fc;
+  --text-normal:   #c9d1d9;
+  --text-muted:    #8b949e;
+  --text-faint:    #6e7681;
+  --text-faintest: #444c56;
+
+  /* 强调色 */
+  --accent:        #58a6ff;   /* 主强调（标题/选中） */
+  --accent-hover:  #1f6feb;   /* 按钮背景 */
+
+  /* 中国股市涨跌色（固定，不随主题变化） */
+  --up:   #FF0000;
+  --down: #00B050;
+
+  /* 滚动条 */
+  --scrollbar-track: #161b22;
+  --scrollbar-thumb: #30363d;
+  --scrollbar-thumb-hover: #484f58;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+input {
+  font-family: inherit;
+}
