@@ -13,19 +13,18 @@
   python backend/daily_collector.py --date 2026-03-25 --now  # 采集指定日期
 """
 
-import sys
-import os
-import time
-import logging
 import argparse
+import logging
+import os
+import sys
+import time
 from datetime import date, datetime
 
 import schedule
 
 from config.settings import COLLECT_SCHEDULE
-from utils.collector import run_collect, is_trading_day
+from utils.collector import is_trading_day, run_collect
 from utils.db import _init_pool
-
 
 # ─── 日志 ────────────────────────────────────────────────────────────────────
 logging.basicConfig(

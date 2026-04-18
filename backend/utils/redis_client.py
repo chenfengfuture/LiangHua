@@ -9,15 +9,14 @@ utils/redis_client.py — Redis 连接池工具 & 新闻采集状态管理
   - 新闻采集状态 Key 定义及便捷操作函数
 """
 
-import time
 import json
+import time
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any, Optional
 
 import redis
 
-from config import REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB, REDIS_DECODE
-
+from config import REDIS_DB, REDIS_DECODE, REDIS_HOST, REDIS_PASSWORD, REDIS_PORT
 
 # ═══════════════════════════════════════════════════════════════════
 #  新闻采集状态 Redis Key 定义

@@ -19,13 +19,18 @@ utils/db.py — 全局数据库连接池（单例）
 
 import threading
 from contextlib import contextmanager
+
 import pymysql
 import pymysql.cursors
 from dbutils.pooled_db import PooledDB
 
-from config.settings import DB_CONFIG, DB_POOL_CONFIG, DB_POOL_CONFIG_COLLECTOR
-from config.settings import NEWS_DB_CONFIG, NEWS_DB_POOL_CONFIG
-
+from config.settings import (
+    DB_CONFIG,
+    DB_POOL_CONFIG,
+    DB_POOL_CONFIG_COLLECTOR,
+    NEWS_DB_CONFIG,
+    NEWS_DB_POOL_CONFIG,
+)
 
 # ═══════════════════════════════════════════════════════════════════
 #  全局连接池（单例）

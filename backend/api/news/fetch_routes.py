@@ -60,20 +60,20 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from utils.redis_client import (
-    _get_client,
+from backend.models.news_models import get_table_name
+from backend.utils.akshare import collect_section
+from backend.utils.db import get_news_conn
+from backend.utils.redis_client import (
     NEWS_DATA_KEY_PREFIX,
+    _get_client,
 )
-from models.news_models import get_table_name
-from utils.db import get_news_conn
-from utils.akshare import collect_section
 
-router = APIRouter(prefix="/api/news", tags=["news-fetch"])
+router = APIRouter(prefix="/api/news/fetch", tags=["news-fetch"])
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -43,5 +43,8 @@ echo.
 echo 提示: 请不要关闭后端/前端的命令行窗口，关闭窗口会停止对应服务
 echo 提示: 如需停止服务，请使用 停止量华平台.bat
 echo.
+echo 浏览器将在5秒后自动打开前端页面...
+timeout /t 5 /nobreak > nul
 
+REM 只打开一次前端页面
 start "" "http://localhost:3000"

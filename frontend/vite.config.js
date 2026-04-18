@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
-    open: true,
+    open: false,  // 禁用Vite自动打开浏览器
   },
 })

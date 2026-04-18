@@ -42,11 +42,11 @@ api/news/news_llm_analyzer.py — 8线程并行新闻 LLM 分析引擎
 """
 
 import json
-import time
-import threading
 import logging
+import threading
+import time
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Dict, Optional
 
 logger = logging.getLogger("news_llm")
 
@@ -355,6 +355,7 @@ class NewsLLMAnalyzer:
                 return
             try:
                 from utils.llm import LLM
+
                 # LLM 是单例类，LLM() 返回全局唯一实例
                 self._llm_client = LLM()
                 # 设置新闻分析专用配置（线程启动时固定，永久不可修改）
@@ -405,11 +406,11 @@ class NewsLLMAnalyzer:
             本次成功分析并写回的新闻条数（0 表示无任务或全部跳过）
         """
         from utils.redis_client import (
-            pending_llm_spop,
+            _unpack_pending_item,
             news_data_get,
             news_data_update,
+            pending_llm_spop,
             pending_persist_push_batch,
-            _unpack_pending_item,
         )
 
         # Step 1: SPOP 获取待分析项（格式: "table_name:news_id" 或 "news_id"）

@@ -32,18 +32,19 @@ utils/llm.py — 火山方舟大模型客户端（Class 封装）
     result = LLM.chat("分析", images=["data:image/png;base64,..."])
 """
 
-import json
 import base64
+import json
 import mimetypes
-import requests
 from pathlib import Path
-from typing import Optional, Generator, List, Dict, Union
+from typing import Dict, Generator, List, Optional, Union
+
+import requests
 
 from config.settings import (
     ARK_API_KEY,
     ARK_BASE_URL,
-    DEFAULT_LLM_MODEL,
     AVAILABLE_LLM_MODELS,
+    DEFAULT_LLM_MODEL,
 )
 
 
@@ -291,7 +292,7 @@ class LLM:
         """
         import json
         import time
-        
+
         # 检查固定配置是否已设置
         if self.news_system_prompt is None:
             print(f"[LLM新闻分析] 警告: news_system_prompt 未设置，使用默认提示词")

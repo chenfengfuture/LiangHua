@@ -31,17 +31,15 @@ api/news/__init__.py — 新闻模块公开接口导出
 ================================================================================
 """
 
-# 路由对象（被 main.py 注册到 FastAPI app）
-from api.news.routes import router
-
-# 后台任务控制（被 main.py lifespan 调用）
-from api.news.routes import start_scheduler, stop_scheduler
-
 # LLM 分析引擎单例（供外部状态查询）
-from api.news.news_llm_analyzer import get_news_analyzer
+from .news_llm_analyzer import get_news_analyzer
 
 # 持久化层单例（供外部状态查询）
-from api.news.news_persist import get_persist_worker
+from .news_persist import get_persist_worker
+
+# 后台任务控制（被 main.py lifespan 调用）
+# 路由对象（被 main.py 注册到 FastAPI app）
+from .routes import router, start_scheduler, stop_scheduler
 
 __all__ = [
     "router",

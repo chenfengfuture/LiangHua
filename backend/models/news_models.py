@@ -25,9 +25,10 @@ models/news_models.py — 新闻系统数据库模型 & 建表
 import hashlib
 import re
 from datetime import datetime
-import pymysql
-from utils.db import get_news_conn, get_news_cursor, table_exists
 
+import pymysql
+
+from utils.db import get_news_conn, get_news_cursor, table_exists
 
 # ─── 特殊字符清洗工具 ─────────────────────────────────────────────
 

@@ -12,20 +12,24 @@ utils/collector.py — 高性能采集器
   - 纯工具函数，可被 routes.py 和 daily_collector.py 共同调用
 """
 
-import time
-import threading
 import logging
-from datetime import date, datetime, timedelta
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime, timedelta
 
-from utils.db import get_conn, batch_insert, _init_pool
+# 动态导入config.settings
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.settings import (
-    COLLECT_WORKERS,
-    COLLECT_BATCH,
     COLLECT_BARS,
+    COLLECT_BATCH,
     COLLECT_RETRY,
     COLLECT_RETRY_SLEEP,
+    COLLECT_WORKERS,
 )
+from utils.db import _init_pool, batch_insert, get_conn
 
 log = logging.getLogger("collector")
 
@@ -44,8 +48,8 @@ def get_mootdx_client():
     if _mootdx_client is not None:
         return _mootdx_client
     try:
-        from mootdx.quotes import Quotes
         from mootdx import config as mdx_config
+        from mootdx.quotes import Quotes
         mdx_config.setup()
         hq_list = mdx_config.get('SERVER').get('HQ', [])
         for srv in hq_list[:5]:
@@ -69,8 +73,8 @@ _client_tls = threading.local()
 def get_thread_client():
     """每个线程维护自己的 mootdx 连接（适合多线程采集）"""
     if getattr(_client_tls, 'client', None) is None:
-        from mootdx.quotes import Quotes
         from mootdx import config as mdx_config
+        from mootdx.quotes import Quotes
         mdx_config.setup()
         hq_list = mdx_config.get('SERVER').get('HQ', [])
         for srv in hq_list[:5]:
