@@ -517,7 +517,7 @@ class StockInfoService:
     
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
         """
-        获取股票基本信息
+        获取股票基本信息（占位实现，实际业务由 StockBasicService 提供）
         
         参数：
             symbol: 股票代码
@@ -525,8 +525,7 @@ class StockInfoService:
         返回：
             股票基本信息字典
         """
-        # 这里实现具体的业务逻辑
-        # 暂时返回一个示例
+        # 占位实现，暂返回示例数据；实际业务请使用 StockBasicService.get_stock_info_em()
         return {
             "symbol": symbol,
             "name": "示例股票",
@@ -535,13 +534,12 @@ class StockInfoService:
     
     def sync_all_stocks(self) -> Dict[str, Any]:
         """
-        同步全市场股票信息
+        同步全市场股票信息（占位实现，实际同步逻辑在 stock_info_service 中）
         
         返回：
             同步结果字典
         """
-        # 这里实现具体的业务逻辑
-        # 暂时返回一个示例
+        # 占位实现，暂返回示例数据；实际业务请使用 stock_info_service.sync_all_stocks()
         return {
             "success": True,
             "message": "同步完成",
@@ -557,13 +555,12 @@ class StockLLMService:
     
     def get_analyzer(self):
         """
-        获取LLM分析器
+        获取LLM分析器（占位实现，实际分析器由 StockLLMAnalyzer 提供）
         
         返回：
             LLM分析器实例
         """
-        # 这里实现具体的业务逻辑
-        # 暂时返回一个示例
+        # 占位实现，暂返回示例数据；实际业务请使用 stock_llm.get_analyzer()
         return {
             "analyzer": "stock_llm_analyzer",
             "status": "ready"
@@ -571,13 +568,12 @@ class StockLLMService:
     
     def initialize_service(self):
         """
-        初始化LLM服务
+        初始化LLM服务（占位实现，实际初始化逻辑在 stock_llm.initialize_service() 中）
         
         返回：
             初始化结果
         """
-        # 这里实现具体的业务逻辑
-        # 暂时返回一个示例
+        # 占位实现，暂返回示例数据；实际业务请使用 stock_llm.initialize_service()
         return {
             "success": True,
             "message": "LLM服务初始化完成"

@@ -3,10 +3,11 @@
 股票基本信息模块
 包含个股基础信息查询接口
 
-重构说明：
-1. 使用全局异常处理器处理所有异常
-2. 服务函数直接抛出异常，由全局异常处理器捕获
-3. 返回结果使用service_result模块统一构建
+统一格式：
+1. 所有函数返回统一格式：{"success": bool, "data": list, "message": str}
+2. 使用request_akshare_data进行安全调用和重试
+3. 异常处理：任何错误都返回success=False，不抛出异常
+4. 统一日志记录（logger.info / logger.error）
 """
 
 import json
@@ -14,54 +15,35 @@ import logging
 from typing import Any, Dict, List
 
 import akshare as ak
-import pandas as pd
 
-from stock_services.unity.utils import _convert_dataframe_to_list, safe_call_with_retry
-from system_service.exception_handler import (
-    ValidationException,
-    DataNotFoundError,
-    ExternalServiceException,
-    DatabaseException
-)
-from system_service.service_result import success_result, error_result
+from system_service.service_result import error_result, success_result
+from stock_services.unity.utils import request_akshare_data
+from stock_services.utils.field_mapper import *
+
 
 logger = logging.getLogger(__name__)
 
 
-def get_stock_info(symbol: str) -> Dict[str, Any]:
+def get_stock_info_em(params) -> Dict[str, Any]:
     """
     查询指定股票代码的个股基础信息（东方财富接口）
 
     Args:
-        symbol: 股票代码，如 "000001"（平安银行），"603777"（来伊份）
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票代码，如 "000001"（平安银行），"603777"（来伊份）
 
     Returns:
         业务数据字典，包含股票信息
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        raise ValidationException(
-            message="股票代码必须为非空字符串",
-            details={"symbol": symbol or ""}
-        )
-
+    symbol = params.get('symbol')
     logger.info(f"[个股信息查询] 开始查询 symbol={symbol}")
-
     # 调用AKShare接口获取个股信息
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_individual_info_em,
         symbol=symbol,
-        max_retries=3,
-        logger_name="个股信息查询"
+        log_prefix="个股信息查询"
     )
-
-    # 数据验证
-    if df is None or df.empty:
-        raise DataNotFoundError(
-            message=f"未找到股票代码 {symbol} 的信息",
-            details={"symbol": symbol}
-        )
-
+    print('df', df)
     # 处理数据
     data_list = []
     if 'item' in df.columns and 'value' in df.columns:
@@ -73,7 +55,7 @@ def get_stock_info(symbol: str) -> Dict[str, Any]:
             data_list.append({"item": item, "value": value})
     else:
         data_list = df.to_dict(orient='records')
-
+    print('data_list', data_list)
     # 转换为字典格式
     data_dict = {}
     for entry in data_list:
@@ -88,8 +70,10 @@ def get_stock_info(symbol: str) -> Dict[str, Any]:
 
     logger.info(f"[个股信息查询] 查询成功 symbol={symbol}, 数据条数={len(data_list)}")
 
+    mapped_data = map_stock_basic(data_dict)
+
     # 返回业务数据，由全局异常处理器处理异常
-    return data_dict
+    return mapped_data
 
 
 def get_stock_info_json(symbol: str) -> str:
@@ -103,7 +87,7 @@ def get_stock_info_json(symbol: str) -> str:
         JSON 字符串，包含业务数据
     """
     # 调用 get_stock_info 获取业务数据
-    data = get_stock_info(symbol)
+    data = get_stock_info_em(symbol)
     
     # 返回 JSON 字符串
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -124,13 +108,6 @@ def get_stock_individual_basic_info_xq(symbol: str) -> List[Dict[str, Any]]:
     Returns:
         公司概况数据列表
     """
-    # 参数验证
-    if not symbol:
-        raise ValidationException(
-            message="股票代码不能为空",
-            details={"symbol": symbol}
-        )
-
     logger.info(f"[雪球公司概况] 开始查询 symbol={symbol}")
 
     # 调用AKShare接口
@@ -142,13 +119,6 @@ def get_stock_individual_basic_info_xq(symbol: str) -> List[Dict[str, Any]]:
     if result is None:
         logger.warning(f"[雪球公司概况] symbol={symbol} 返回为None")
         return data_list  # 返回空列表
-
-    if hasattr(result, 'empty'):
-        df = result
-        if df is None or len(df) == 0:
-            logger.warning(f"[雪球公司概况] symbol={symbol} 返回数据为空")
-            return data_list
-        data_list = _convert_dataframe_to_list(df, "[雪球公司概况]")
 
     elif isinstance(result, dict):
         data_list = [result] if result else []
@@ -213,7 +183,7 @@ def get_all_stock_codes_json() -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def stock_info_sh_name_code(symbol: str = "主板A股") -> List[Dict[str, Any]]:
+def stock_info_sh_name_code(params) -> Dict[str, Any]:
     """
     上海证券交易所股票代码和简称数据
     
@@ -223,58 +193,40 @@ def stock_info_sh_name_code(symbol: str = "主板A股") -> List[Dict[str, Any]]:
     限量: 单次获取所有上海证券交易所股票代码和简称数据
     
     Args:
-        symbol: 股票板块类型，可选值：
-            - "主板A股": 主板A股
-            - "主板B股": 主板B股  
-            - "科创板": 科创板
-            默认: "主板A股"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票板块类型，可选值：
+                - "主板A股": 主板A股
+                - "主板B股": 主板B股  
+                - "科创板": 科创板
+                默认: "主板A股"
     
     Returns:
-        股票列表数据，格式: [{"证券代码": "600000", "证券简称": "浦发银行", "上市日期": "1999-11-10", ...}, ...]
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 股票列表数据，已映射到stocks_info表结构
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        raise ValidationException(
-            message="symbol参数必须为非空字符串",
-            details={"symbol": symbol or ""}
-        )
-    
-    valid_symbols = {"主板A股", "主板B股", "科创板"}
-    if symbol not in valid_symbols:
-        raise ValidationException(
-            message=f"symbol参数必须为以下值之一: {', '.join(sorted(valid_symbols))}",
-            details={"symbol": symbol}
-        )
-    
-    logger.info(f"[上交所股票列表] 开始查询 symbol={symbol}")
-    
+    symbol = params.get('symbol', '主板A股')
     # 调用AKShare接口
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_info_sh_name_code,
         symbol=symbol,
-        max_retries=3,
-        logger_name="上交所股票列表"
+        log_prefix="上交所股票列表"
     )
     
-    # 数据验证
-    if df is None:
-        logger.warning(f"[上交所股票列表] symbol={symbol} 返回为None")
-        return []  # 返回空列表
+    if not df:
+        return error_result(message=f"[上交所股票列表] symbol={symbol} 查询失败，数据条数={len(df)}")
     
-    if df.empty:
-        logger.warning(f"[上交所股票列表] symbol={symbol} 返回数据为空")
-        return []  # 返回空列表
-    
-    # 转换数据格式
-    data_list = _convert_dataframe_to_list(df, "[上交所股票列表]")
-    
-    logger.info(f"[上交所股票列表] symbol={symbol} 查询成功，数据条数={len(data_list)}")
-    
+    logger.info(f"[上交所股票列表] symbol={symbol} 查询成功，数据条数={len(df['data'])}")
     # 返回业务数据
-    return data_list
+    result = map_stock_basic(df, '主板A股', 'sh')
+    
+    return result
 
 
-def stock_info_sz_name_code(symbol: str = "A股列表") -> List[Dict[str, Any]]:
+def stock_info_sz_name_code(params: dict) -> Dict[str, Any]:
     """
     深圳证券交易所股票代码和简称数据
     
@@ -284,59 +236,41 @@ def stock_info_sz_name_code(symbol: str = "A股列表") -> List[Dict[str, Any]]:
     限量: 单次获取深圳证券交易所股票代码和简称数据
     
     Args:
-        symbol: 股票列表类型，可选值：
-            - "A股列表": A股列表
-            - "B股列表": B股列表
-            - "AB股列表": AB股列表
-            - "CDR列表": CDR列表
-            默认: "A股列表"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票列表类型，可选值：
+                - "A股列表": A股列表
+                - "B股列表": B股列表
+                - "AB股列表": AB股列表
+                - "CDR列表": CDR列表
+                默认: "A股列表"
     
     Returns:
-        股票列表数据，格式: [{"A股代码": "000001", "A股简称": "平安银行", "A股上市日期": "1991-04-03", ...}, ...]
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 股票列表数据，已映射到stocks_info表结构
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        raise ValidationException(
-            message="symbol参数必须为非空字符串",
-            details={"symbol": symbol or ""}
-        )
-    
-    valid_symbols = {"A股列表", "B股列表", "AB股列表", "CDR列表"}
-    if symbol not in valid_symbols:
-        raise ValidationException(
-            message=f"symbol参数必须为以下值之一: {', '.join(sorted(valid_symbols))}",
-            details={"symbol": symbol}
-        )
-    
-    logger.info(f"[深交所股票列表] 开始查询 symbol={symbol}")
-    
+    symbol = params.get('symbol', 'A股列表')
     # 调用AKShare接口
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_info_sz_name_code,
         symbol=symbol,
-        max_retries=3,
-        logger_name="深交所股票列表"
+        log_prefix="深交所股票列表"
     )
     
-    # 数据验证
-    if df is None:
-        logger.warning(f"[深交所股票列表] symbol={symbol} 返回为None")
-        return []  # 返回空列表
+    if not df:
+        return error_result(message=f"[深交所股票列表] symbol={symbol} 查询失败，数据条数={len(df)}")
     
-    if df.empty:
-        logger.warning(f"[深交所股票列表] symbol={symbol} 返回数据为空")
-        return []  # 返回空列表
-    
-    # 转换数据格式
-    data_list = _convert_dataframe_to_list(df, "[深交所股票列表]")
-    
-    logger.info(f"[深交所股票列表] symbol={symbol} 查询成功，数据条数={len(data_list)}")
-    
+    logger.info(f"[深交所股票列表] symbol={symbol} 查询成功，数据条数={len(df['data'])}")
     # 返回业务数据
-    return data_list
+    result = map_stock_basic(df, 'sz', symbol)
+    
+    return result
 
 
-def stock_info_bj_name_code() -> List[Dict[str, Any]]:
+def stock_info_bj_name_code(params: dict) -> Dict[str, Any]:
     """
     北京证券交易所股票代码和简称数据
     
@@ -346,43 +280,31 @@ def stock_info_bj_name_code() -> List[Dict[str, Any]]:
     限量: 单次获取北京证券交易所所有的股票代码和简称数据
     
     Returns:
-        股票列表数据，格式: [{"证券代码": "430047", "证券简称": "诺思兰德", "总股本(万股)": "12345", ...}, ...]
-    
-    使用说明：
-        1. 该接口获取北京证券交易所所有股票列表
-        2. 包含证券代码、证券简称、总股本等基本信息
-        3. 数据来源为北京证券交易所官网
-        4. 可用于获取北交所股票基础数据
-        5. 注意：北交所股票代码以8开头
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 股票列表数据，已映射到stocks_info表结构
+            "message": str        # 成功或错误信息
+        }
     """
     logger.info("[北交所股票列表] 开始查询")
     
     # 调用AKShare接口
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_info_bj_name_code,
-        max_retries=3,
-        logger_name="北交所股票列表"
+        log_prefix="北交所股票列表"
     )
     
-    # 数据验证
-    if df is None:
-        logger.warning("[北交所股票列表] 返回为None")
-        return []  # 返回空列表
+    if not df:
+        return error_result(message="[北交所股票列表] 查询失败")
     
-    if df.empty:
-        logger.warning("[北交所股票列表] 返回数据为空")
-        return []  # 返回空列表
-    
-    # 转换数据格式
-    data_list = _convert_dataframe_to_list(df, "[北交所股票列表]")
-    
-    logger.info(f"[北交所股票列表] 查询成功，数据条数={len(data_list)}")
-    
+    logger.info(f"[北交所股票列表] 查询成功，数据条数={len(df['data'])}")
     # 返回业务数据
-    return data_list
+    result = map_stock_basic(df, 'bj', '北交所')
+    return result
 
 
-def stock_info_sz_delist(symbol: str = "终止上市公司") -> List[Dict[str, Any]]:
+def stock_info_sz_delist(params: dict) -> Dict[str, Any]:
     """
     深圳证券交易所终止/暂停上市股票
     
@@ -392,112 +314,78 @@ def stock_info_sz_delist(symbol: str = "终止上市公司") -> List[Dict[str, A
     限量: 单次获取深圳证券交易所终止/暂停上市数据
     
     Args:
-        symbol: 股票状态类型，可选值：
-            - "终止上市公司": 终止上市公司
-            - "暂停上市公司": 暂停上市公司
-            默认: "终止上市公司"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票状态类型，可选值：
+                - "终止上市公司": 终止上市公司
+                - "暂停上市公司": 暂停上市公司
+                默认: "终止上市公司"
     
     Returns:
-        退市股票列表数据，格式: [{"公司代码": "000003", "公司简称": "PT金田A", "终止上市日期": "2002-09-05", ...}, ...]
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 退市股票列表数据，已映射到stocks_info表结构
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        raise ValidationException(
-            message="symbol参数必须为非空字符串",
-            details={"symbol": symbol or ""}
-        )
-    
-    valid_symbols = {"终止上市公司", "暂停上市公司"}
-    if symbol not in valid_symbols:
-        raise ValidationException(
-            message=f"symbol参数必须为以下值之一: {', '.join(sorted(valid_symbols))}",
-            details={"symbol": symbol}
-        )
-    
+    symbol = params.get('symbol', '终止上市公司')
     logger.info(f"[深交所退市股票] 开始查询 symbol={symbol}")
-    
     # 调用AKShare接口
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_info_sz_delist,
         symbol=symbol,
-        max_retries=3,
-        logger_name="深交所退市股票"
+        log_prefix="深交所股票列表"
     )
+    if not df:
+        return error_result(message=f"[深交所退市股票] symbol={symbol} 查询失败，数据条数={len(df)}")
     
-    # 数据验证
-    if df is None:
-        logger.warning(f"[深交所退市股票] symbol={symbol} 返回为None")
-        return []  # 返回空列表
-    
-    if df.empty:
-        logger.warning(f"[深交所退市股票] symbol={symbol} 返回数据为空")
-        return []  # 返回空列表
-    
-    # 转换数据格式
-    data_list = _convert_dataframe_to_list(df, "[深交所退市股票]")
-    
-    logger.info(f"[深交所退市股票] symbol={symbol} 查询成功，数据条数={len(data_list)}")
-    
+    logger.info(f"[深交所退市股票] symbol={symbol} 查询成功，数据条数={len(df['data'])}")
     # 返回业务数据
-    return data_list
+    sz_delist = map_stock_basic(df, 'sz_delist')
+    result = set_stock_delist(sz_delist)
+    return result
 
 
-def stock_info_sh_delist(symbol: str = "全部") -> List[Dict[str, Any]]:
+def stock_info_sh_delist(params: dict) -> Dict[str, Any]:
     """
     上海证券交易所暂停/终止上市股票
-    
+
     接口: akshare.stock_info_sh_delist
     目标地址: https://www.sse.com.cn/assortment/stock/list/delisting/
     描述: 获取上海证券交易所暂停/终止上市股票数据
     限量: 单次获取上海证券交易所暂停/终止上市股票
     
     Args:
-        symbol: 市场类型，可选值：
-            - "全部": 全部市场
-            - "沪市": 沪市主板
-            - "科创板": 科创板
-            默认: "全部"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 市场类型，可选值：
+                - "全部": 全部市场
+                - "沪市": 沪市主板
+                - "科创板": 科创板
+                默认: "全部"
     
     Returns:
-        退市股票列表数据，格式: [{"公司代码": "600001", "公司简称": "邯郸钢铁", "终止上市日期": "2009-12-29", ...}, ...]
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 退市股票列表数据，已映射到stocks_info表结构
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        raise ValidationException(
-            message="symbol参数必须为非空字符串",
-            details={"symbol": symbol or ""}
-        )
-    
-    valid_symbols = {"全部", "沪市", "科创板"}
-    if symbol not in valid_symbols:
-        raise ValidationException(
-            message=f"symbol参数必须为以下值之一: {', '.join(sorted(valid_symbols))}",
-            details={"symbol": symbol}
-        )
-    
+    symbol = params.get('symbol', '全部')
     logger.info(f"[上交所退市股票] 开始查询 symbol={symbol}")
-    
+
     # 调用AKShare接口
-    df = safe_call_with_retry(
+    df = request_akshare_data(
         ak.stock_info_sh_delist,
         symbol=symbol,
-        max_retries=3,
-        logger_name="上交所退市股票"
+        log_prefix="上交所退市股票"
     )
     
-    # 数据验证
-    if df is None:
-        logger.warning(f"[上交所退市股票] symbol={symbol} 返回为None")
-        return []  # 返回空列表
+    if not df:
+        return error_result(message=f"[上交所退市股票] symbol={symbol} 查询失败，数据条数={len(df['data'])}")
     
-    if df.empty:
-        logger.warning(f"[上交所退市股票] symbol={symbol} 返回数据为空")
-        return []  # 返回空列表
-    
-    # 转换数据格式
-    data_list = _convert_dataframe_to_list(df, "[上交所退市股票]")
-    
-    logger.info(f"[上交所退市股票] symbol={symbol} 查询成功，数据条数={len(data_list)}")
-    
+    logger.info(f"[上交所退市股票] symbol={symbol} 查询成功，数据条数={len(df['data'])}")
     # 返回业务数据
-    return data_list
+    sh_delist = map_stock_basic(df, 'sh_delist')
+    result = set_stock_delist(sh_delist)
+    return result

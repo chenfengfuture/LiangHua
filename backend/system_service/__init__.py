@@ -45,6 +45,30 @@ from .exception_handler import (
     register_global_exception_handler,
 )
 
+# 导出表结构缓存服务
+from .schema_cache import (
+    SchemaCache,
+    get_schema_cache,
+    get_table_columns,
+    cast_value_by_column,
+    filter_record_by_schema,
+)
+
+from .db_service import (
+    DBService,
+    get_db_service,
+    upsert_data_with_schema,
+    simple_upsert,
+)
+
+from .async_writer import (
+    AsyncWriter,
+    WriteTask,
+    get_async_writer,
+    submit_async_upsert,
+    shutdown_async_writer,
+)
+
 __all__ = [
     # 服务结果结构
     "ServiceResult",
@@ -61,4 +85,24 @@ __all__ = [
     "DatabaseException",
     "ExternalServiceException",
     "register_global_exception_handler",
+    
+    # 表结构缓存
+    "SchemaCache",
+    "get_schema_cache",
+    "get_table_columns",
+    "cast_value_by_column",
+    "filter_record_by_schema",
+    
+    # 数据库写入服务
+    "DBService",
+    "get_db_service",
+    "upsert_data_with_schema",
+    "simple_upsert",
+    
+    # 异步写入服务
+    "AsyncWriter",
+    "WriteTask",
+    "get_async_writer",
+    "submit_async_upsert",
+    "shutdown_async_writer",
 ]

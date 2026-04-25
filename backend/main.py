@@ -9,7 +9,11 @@
 3. 服务层分离：业务逻辑在services/目录，路由只负责HTTP层
 
 
-数据库：lianghua (MySQL)，按年分表：stock_klines_YYYY
+数据库：lianghua (MySQL)
+主要分表策略：
+  - 日K线按年分表：stock_klines_YYYY
+  - 日内分时按日分表：intraday_transactions_YYYYMMDD
+  - 新闻数据按月分表：news_global_YYYYMM
 """
 
 import asyncio, json, logging, sys, os
@@ -103,7 +107,7 @@ async def lifespan(app: FastAPI):
     logger.info("[启动] LLM API 可达性验证启动")
 
     # 4. 初始化Redis键
-    from utils.redis_client import init_news_keys
+    from utils.redis_client_compat import init_news_keys
     init_news_keys()
     logger.info("[启动] Redis键初始化完成")
 
@@ -120,6 +124,25 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     logger.info("[启动] 新闻后台任务已启动")
 
+    # 7. 初始化通用服务
+    try:
+        from stock_services.services.commont import init_common_services
+        init_results = init_common_services(worker_count=2, max_queue_size=1000)
+        
+        if init_results.get("async_writer", {}).get("success"):
+            logger.info("[启动] 异步写入服务初始化成功")
+        else:
+            logger.warning("[启动] 异步写入服务初始化失败或已存在")
+        
+        if init_results.get("thread_pool", {}).get("success"):
+            logger.info("[启动] 线程池服务初始化成功")
+        else:
+            logger.warning("[启动] 线程池服务初始化失败或已存在")
+            
+    except Exception as e:
+        logger.warning(f"[启动] 通用服务初始化异常: {e}")
+        # 不阻止应用启动，服务会在首次使用时自动初始化
+
     logger.info("应用启动完成")
 
     yield
@@ -133,9 +156,22 @@ async def lifespan(app: FastAPI):
     logger.info("[关闭] 新闻后台任务已停止")
 
     # 2. 关闭Redis连接
-    from utils.redis_client import close_redis
+    from utils.redis_client_compat import close_redis
     close_redis()
     logger.info("[关闭] Redis连接已关闭")
+
+    # 3. 关闭通用服务
+    try:
+        from stock_services.services.commont import shutdown_common_services
+        shutdown_results = shutdown_common_services(wait=True)
+        
+        if shutdown_results.get("async_writer", {}).get("success"):
+            logger.info("[关闭] 异步写入服务已关闭")
+        else:
+            logger.warning("[关闭] 异步写入服务关闭异常")
+            
+    except Exception as e:
+        logger.warning(f"[关闭] 通用服务关闭异常: {e}")
 
     logger.info("应用关闭完成")
 

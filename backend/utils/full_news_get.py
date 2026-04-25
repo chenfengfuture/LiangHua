@@ -26,7 +26,7 @@ from models.news_models import (
     ensure_table_exists,
     insert_news_with_content_hash,
 )
-from utils.redis_client import (
+from utils.redis_client_compat import (
     news_data_set,
     pending_llm_add_batch,
 )

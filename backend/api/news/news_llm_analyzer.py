@@ -405,7 +405,7 @@ class NewsLLMAnalyzer:
         Returns:
             本次成功分析并写回的新闻条数（0 表示无任务或全部跳过）
         """
-        from utils.redis_client import (
+        from utils.redis_client_compat import (
             _unpack_pending_item,
             news_data_get,
             news_data_update,
@@ -590,7 +590,7 @@ class NewsLLMAnalyzer:
         Returns:
             包含线程数、存活线程、队列大小、配置参数的字典
         """
-        from utils.redis_client import pending_llm_size, pending_persist_size
+        from utils.redis_client_compat import pending_llm_size, pending_persist_size
 
         alive_threads = [t.name for t in self._threads if t.is_alive()]
         return {

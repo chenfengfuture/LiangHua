@@ -46,7 +46,7 @@ from models.news_models import (
     insert_news_with_content_hash,
     sanitize_text,
 )
-from utils.redis_client import (  # 新三层 Redis 架构
+from utils.redis_client_compat import (  # 新三层 Redis 架构
     get_last_collect_time,
     is_cctv_today_done,
     news_data_set,
@@ -992,7 +992,7 @@ def collect_and_analyze(limit: int = 20) -> Dict[str, dict]:
     total_collect = sum(v for v in result.get("collect", {}).values() if isinstance(v, int))
     pending = 0
     try:
-        from utils.redis_client import pending_llm_size
+        from utils.redis_client_compat import pending_llm_size
         pending = pending_llm_size()
     except Exception:
         pass

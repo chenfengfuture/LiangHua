@@ -14,7 +14,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
-from utils.redis_client import *
+from utils.redis_client_compat import *
 
 
 logger = logging.getLogger(__name__)

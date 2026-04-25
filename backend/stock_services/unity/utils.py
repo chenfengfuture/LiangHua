@@ -12,9 +12,12 @@
 import logging
 import random
 import time
-from typing import Any, Callable, Dict, Tuple
+import re
+from typing import Any, Callable, Dict, List
 
 import pandas as pd
+from system_service.service_result import error_result, success_result, wrap_service_result
+
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -72,15 +75,13 @@ def safe_call_with_retry(
 
     # 所有重试都失败，抛出最后一个异常
     if last_exception:
-        raise last_exception
-
+        return error_result(message=last_exception)
 
 def _convert_dataframe_to_list(
     df: pd.DataFrame, log_prefix: str = ""
 ) -> list:
     """
     安全地将DataFrame转换为字典列表
-
     Args:
         df: pandas DataFrame对象
         log_prefix: 日志前缀
@@ -89,7 +90,6 @@ def _convert_dataframe_to_list(
         字典列表
     """
     data_list = []
-
     # 检查DataFrame是否为空或无效
     if df is None:
         logger.warning(f"{log_prefix} DataFrame为None")
@@ -125,64 +125,133 @@ def _convert_dataframe_to_list(
 
     return data_list
 
-
-def create_success_response(
-    data: Any, symbol: str = "", error: str = None
-) -> Dict[str, Any]:
-    """创建成功响应"""
-    return {
-        "success": True,
-        "data": data,
-        "error": error,
-        "symbol": symbol,
-    }
+def request_akshare_data(api_func, log_prefix, *args, **kwargs):
+    safe_kwargs = kwargs.copy()
+    df = safe_call_with_retry(api_func, max_retries=3, *args, **safe_kwargs)
+    if df is None or (hasattr(df, 'empty') and df.empty):
+        return None  # 或空列表
+    dataframe_to_list = _convert_dataframe_to_list(df, log_prefix)
+    return success_result(data=dataframe_to_list)
 
 
-def create_error_response(
-    error: str, symbol: str = "", data: Any = None
-) -> Dict[str, Any]:
-    """创建错误响应"""
-    return {
-        "success": False,
-        "data": data,
-        "error": error,
-        "symbol": symbol,
-    }
+class StockValidateService:
+    @wrap_service_result
+    def validate_symbol(self, symbol: str) -> Dict[str, Any]:
+        """
+        验证股票代码格式 - 通用工具方法
 
+        Args:
+            symbol: 股票代码
 
-def log_and_handle_error(
-    error_msg: str,
-    log_prefix: str,
-    symbol: str = "",
-    max_retries: int = 3,
-    base_delay: float = 2.0,
-    attempt: int = 0,
-    exc_info: str = None,
-) -> Tuple[Dict[str, Any], bool]:
-    """
-    通用错误日志和响应处理
+        Returns:
+            验证结果，如果成功返回成功结果，失败返回错误结果
+        """
+        if not symbol or not isinstance(symbol, str):
 
-    Args:
-        error_msg: 错误信息
-        log_prefix: 日志前缀
-        symbol: 股票代码
-        max_retries: 最大重试次数
-        base_delay: 基础延迟
-        attempt: 当前尝试次数
-        exc_info: 异常详情
+            return error_result(
+                message="股票代码不能为空且必须是字符串",
+                data={"symbol": symbol}
+            )
 
-    Returns:
-        (响应字典, 是否应该继续重试)
-    """
-    if attempt < max_retries - 1:
-        delay = base_delay * (2**attempt) + random.uniform(0, 1)
-        logger.warning(
-            f"{log_prefix} 第{attempt + 1}次失败 {symbol}，{delay:.1f}秒后重试: {error_msg}"
+        # 标准化symbol格式（确保大写）
+        symbol = symbol.strip().upper()
+
+        # 基本格式验证：至少包含字母和数字
+        if not re.match(r'^[A-Z]{1,4}\d{6}$', symbol):
+            # 尝试添加市场前缀
+            if symbol.startswith(('SH', 'SZ')):
+                if not re.match(r'^(SH|SZ)\d{6}$', symbol):
+                    return error_result(
+                        message=f"股票代码格式不正确: {symbol}",
+                        data={"symbol": symbol}
+                    )
+            else:
+                # 尝试自动添加市场前缀
+                if len(symbol) == 6:
+                    # 简单规则：6位数字，0/3开头为深圳，6开头为上海
+                    if symbol[0] in ('0', '3'):
+                        symbol = f"SZ{symbol}"
+                    elif symbol[0] in ('6', '9'):
+                        symbol = f"SH{symbol}"
+                    else:
+                        return error_result(
+                            message=f"无法识别股票代码市场: {symbol}",
+                            data={"symbol": symbol}
+                        )
+                else:
+                    return error_result(
+                        message=f"股票代码格式不正确: {symbol}",
+                        data={"symbol": symbol}
+                    )
+
+        return success_result(
+            message="股票代码验证成功",
+            data={"symbol": symbol}
         )
-        time.sleep(delay)
-        return create_error_response(error_msg, symbol), True
-    else:
-        logger.error(f"{log_prefix} 最终失败 {symbol}, error={error_msg}")
-        if exc_info:
-            logger.debug(f"{log_prefix} 异常详情: {exc_info}")
-        return create_error_response(error_msg, symbol), False
+
+    @wrap_service_result
+    def validate_required_params(self, params: Dict[str, Any], required_keys: List[str]) -> Dict[str, Any]:
+        """
+        验证必需参数是否存在 - 通用工具方法
+
+        Args:
+            params: 参数字典
+            required_keys: 必需参数键列表
+
+        Returns:
+            验证结果，如果成功返回成功结果，失败返回错误结果
+        """
+        missing_keys = []
+        for key in required_keys:
+            if key not in params or params[key] is None:
+                missing_keys.append(key)
+
+        if missing_keys:
+            return error_result(
+                message=f"缺少必需参数: {', '.join(missing_keys)}",
+                data={"missing_keys": missing_keys, "params": params}
+            )
+
+        return success_result(
+            message="参数验证成功",
+            data={"params": params}
+        )
+
+    def validate_sh_symbol_type(self, symbol: str) -> Dict[str, Any]:
+        """
+        验证上交所股票列表查询参数
+
+        Args:
+            params: 参数字典，包含symbol字段
+
+        Returns:
+            验证结果字典
+        """
+        # 验证参数不能为空
+        if not symbol or not isinstance(symbol, str):
+            return error_result(
+                message="板块类型参数不能为空且必须是字符串",
+                data={"symbol": symbol}
+            )
+
+        # 验证板块类型
+        valid_types = {"主板A股", "主板B股", "科创板"}
+        if symbol not in valid_types:
+            return error_result(
+                message=f"板块类型参数必须为以下值之一: {', '.join(sorted(valid_types))}",
+                data={"symbol": symbol, "valid_types": list(valid_types)}
+            )
+
+        return success_result(
+            message="板块类型参数验证成功",
+            data={"symbol": symbol}
+        )
+
+
+stock_validate_service = StockValidateService()
+
+__all__ = [
+    'stock_validate_service',
+    'StockValidateService',
+    'request_akshare_data'
+]

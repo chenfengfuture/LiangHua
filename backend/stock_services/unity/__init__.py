@@ -431,10 +431,8 @@ _init_akshare_global_config()
 # 位置: backend/api/stock/unity/basic/service.py
 # ----------------------------------------------------------------------------
 from stock_services.unity.basic import get_all_stock_codes  # 查询全市场A股股票代码列表
-from stock_services.unity.basic import get_all_stock_codes_json  # 查询全市场A股股票代码列表并返回JSON
 from stock_services.unity.basic import get_stock_individual_basic_info_xq  # 查询雪球财经-个股-公司概况
-from stock_services.unity.basic import get_stock_info  # 查询个股基础信息（东方财富接口）
-from stock_services.unity.basic import get_stock_info_json  # 查询个股信息并返回JSON字符串
+from stock_services.unity.basic import get_stock_info_em  # 查询个股基础信息（东方财富接口）
 from stock_services.unity.basic import stock_info_bj_name_code  # 北京证券交易所股票代码和简称数据
 from stock_services.unity.basic import stock_info_sh_delist  # 上海证券交易所暂停/终止上市股票
 from stock_services.unity.basic import stock_info_sh_name_code  # 上海证券交易所股票代码和简称数据
@@ -556,11 +554,9 @@ from stock_services.unity.zt import get_stock_zt_pool_zbgc_em  # 东方财富炸
 
 __all__ = [
     # basic
-    "get_stock_info",
-    "get_stock_info_json",
+    "get_stock_info_em",
     "get_stock_individual_basic_info_xq",
     "get_all_stock_codes",
-    "get_all_stock_codes_json",
     "stock_info_sh_name_code",
     "stock_info_sz_name_code",
     "stock_info_bj_name_code",

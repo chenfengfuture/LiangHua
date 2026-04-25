@@ -24,15 +24,7 @@ from .llm.routes import router as llm_router
 from .news.routes import router as news_router
 from .stock.routes import router as stock_router
 
-# 导入Unity路由
-try:
-    from .stock.routes_unity import router as stock_unity_router
-    HAS_STOCK_UNITY_ROUTER = True
-except ImportError:
-    HAS_STOCK_UNITY_ROUTER = False
-    stock_unity_router = None
-
-# 导入新闻采集路由（保持向后兼容）
+# 导入新闻数据查询路由（可选，导入失败时降级不影响主流程）
 try:
     from .news.fetch_routes import router as news_fetch_router
     HAS_NEWS_FETCH_ROUTER = True
@@ -44,12 +36,9 @@ except ImportError:
 __all__ = [
     # 主路由
     "news_router",
-    "stock_router", 
+    "stock_router",
     "llm_router",
-    
-    # 股票Unity路由
-    "stock_unity_router",
-    
+
     # 新闻子路由
     "news_fetch_router",
     
@@ -80,14 +69,6 @@ ROUTER_CONFIGS = [
     }
 ]
 
-# 如果有股票Unity路由，也添加到配置
-if HAS_STOCK_UNITY_ROUTER and stock_unity_router:
-    ROUTER_CONFIGS.insert(1, {
-        "router": stock_unity_router,
-        "prefix": "",  # stock_unity_router已经有自己的prefix
-        "tags": ["stock-unity"],
-        "description": "股票Unity数据接口"
-    })
 
 # 如果有新闻采集路由，也添加到配置
 if HAS_NEWS_FETCH_ROUTER and news_fetch_router:
@@ -126,10 +107,12 @@ def get_all_routers():
     return ROUTER_CONFIGS
 
 
-# 向后兼容的导出
+# 向后兼容导出（用于需要以元组形式获取路由的旧代码）
 def get_routers():
     """
-    获取所有路由（向后兼容）
+    获取所有路由（向后兼容版本，返回元组）
+    
+    建议新代码改用 get_all_routers() 或 configure_routes()。
     
     返回：
         (news_router, stock_router, llm_router, news_fetch_router)

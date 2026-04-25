@@ -27,8 +27,9 @@ CREATE TABLE IF NOT EXISTS `stocks_info` (
     `symbol`      VARCHAR(20)   NOT NULL                      COMMENT '股票代码（如000001.SZ）',
     `name`        VARCHAR(100)  DEFAULT NULL                  COMMENT '股票简称',
     `market`      VARCHAR(10)   DEFAULT NULL                  COMMENT '市场: SH/SZ/BJ',
+    `market_type`      VARCHAR(20)   DEFAULT NULL             COMMENT '板块类型：主板A股/主板B股...',
     `list_date`   DATE          DEFAULT NULL                  COMMENT '上市日期',
-
+    
     -- 公司全称与概况
     `full_name`   VARCHAR(200)  DEFAULT NULL                  COMMENT '公司全称',
     `eng_name`    VARCHAR(200)  DEFAULT NULL                  COMMENT '公司英文名称',
@@ -54,11 +55,16 @@ CREATE TABLE IF NOT EXISTS `stocks_info` (
     -- 其他补充
     `website`     VARCHAR(200)  DEFAULT NULL                  COMMENT '公司官网',
     `region`      VARCHAR(50)   DEFAULT NULL                  COMMENT '注册地（省/市）',
-    `introduction` TEXT                                        COMMENT '公司简介（300字以内）',
+    `introduction` TEXT                                       COMMENT '公司简介（300字以内）',
 
     -- 状态
-    `is_active`  TINYINT(1)   NOT NULL DEFAULT 1               COMMENT '是否在市（1=在市，0=退市/摘牌）',
-
+    `is_active`  TINYINT(1)   NOT NULL DEFAULT 1              COMMENT '是否在市（1=在市，0=退市/摘牌）',
+    -- ai分析
+    `ai_analyzed`  TINYINT(1)   NOT NULL DEFAULT 0            COMMENT '是否经过ai分析（1=经过，0=未经过）',
+    -- ai分析时间 (作为过期缓存查询)
+    `ai_analyzed_time`   DATE          DEFAULT NULL                COMMENT 'ai分析时间',
+    -- 缓存字段key
+    `cache_key`      VARCHAR(60)   DEFAULT NULL               COMMENT '缓存字段key',
     -- 元数据
     `update_time` DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
 

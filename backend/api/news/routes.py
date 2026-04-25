@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 # 导入工具模块
-from utils.redis_client import (
+from utils.redis_client_compat import (
     NEWS_CCTV_TODONE_KEY,
     NEWS_COLLECT_TIME_KEYS,
     _get_client,

@@ -73,7 +73,7 @@ def _persist_once() -> int:
         本次成功持久化到 MySQL 的记录数（0 表示无任务或全部跳过）
     """
     from models.news_models import batch_update_ai_case
-    from utils.redis_client import (
+    from utils.redis_client_compat import (
         _unpack_pending_item,
         news_data_batch_get,
         pending_persist_pop_batch,
@@ -270,7 +270,7 @@ class NewsPersistWorker:
         Returns:
             包含运行状态、统计数据、队列大小、配置参数的字典
         """
-        from utils.redis_client import pending_persist_size
+        from utils.redis_client_compat import pending_persist_size
 
         uptime_seconds = None
         if self._start_time:

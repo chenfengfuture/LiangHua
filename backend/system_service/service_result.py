@@ -79,6 +79,7 @@ def error_result(message: str, data: Any = None) -> Dict[str, Any]:
     Returns:
         包含错误结果的字典
     """
+    message = message if message else "未知错误"
     return {
         "success": False,
         "message": message,
