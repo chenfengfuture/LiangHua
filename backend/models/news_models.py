@@ -29,6 +29,7 @@ from datetime import datetime
 import pymysql
 
 from utils.db import get_news_conn, get_news_cursor, table_exists
+from .base import TABLE_COMMON_SUFFIX
 
 # ─── 特殊字符清洗工具 ─────────────────────────────────────────────
 
@@ -136,13 +137,10 @@ CREATE TABLE IF NOT EXISTS `{table_name}` (
     market_reaction       TEXT         DEFAULT NULL                  COMMENT '【扩展】市场实际反应，JSON格式',
 
     -- ═══════════════════════════════════════════════════════════════
-    -- 数据治理（5字段）：记录生命周期管理
+    -- 数据治理（2字段）：记录生命周期管理
     -- ═══════════════════════════════════════════════════════════════
-    create_time           DATETIME     DEFAULT CURRENT_TIMESTAMP     COMMENT '记录创建时间（系统自动）',
-    update_time           DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录最后更新时间（系统自动）',
     data_version          VARCHAR(20)  DEFAULT 'v1.0'                COMMENT '数据版本号（当前 v1.0，字段精简版）',
     operator              VARCHAR(50)  DEFAULT NULL                  COMMENT '操作人/系统标识（如：llm_analyzer / manual）',
-    is_deleted            TINYINT      DEFAULT 0                     COMMENT '逻辑删除标记（1=已删除 / 0=正常）',
 
     -- ═══════════════════════════════════════════════════════════════
     -- 去重 & 索引
@@ -154,12 +152,10 @@ CREATE TABLE IF NOT EXISTS `{table_name}` (
     INDEX idx_need_analyze        (need_analyze),
     INDEX idx_is_processed        (is_processed),
     INDEX idx_ai_impact_direction (ai_impact_direction),
-    INDEX idx_is_deleted          (is_deleted),
     INDEX idx_news_type           (news_type),
     INDEX idx_source              (source),
-    UNIQUE INDEX uk_content_hash  (content_hash)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='{comment}'
-"""
+    UNIQUE INDEX uk_content_hash  (content_hash),
+""" + TABLE_COMMON_SUFFIX.format(table_comment='{comment}')
 
 
 # ─── content_hash 工具 ────────────────────────────────────────────────
@@ -342,146 +338,6 @@ def ensure_table_exists(news_type: str, year_month: str):
 # ─── CRUD 工具 ────────────────────────────────────────────────────
 
 BATCH_SIZE = 500  # 每批写入条数
-
-
-def insert_news(news_type: str, year_month: str, rows: list[dict]) -> int:
-    """
-    批量插入新闻（INSERT IGNORE + 500 条分批）。
-    自动计算 url_hash 并写入。
-    使用 news_data 连接。
-
-    容错策略（v5）：
-      - 正常路径：直接写入，不做前置检查
-      - 捕获 ER_BAD_DB_ERROR(1049)：自动建库 → 建表 → 重试一次
-      - 捕获 ER_NO_SUCH_TABLE(1146)：自动建表 → 重试一次
-      - 其他错误（如重复键/连接失败）：按原有逻辑处理
-
-    Returns:
-        实际插入行数
-    """
-    if not rows:
-        return 0
-
-    table_name = get_table_name(news_type, year_month)
-
-    # ─── 入库前安全清洗 ────────────────────────────────────────────
-    _TEXT_FIELDS = {
-        "title", "content", "url", "source", "source_category",
-        "news_type", "ai_interpretation", "ai_event_type",
-        "ai_benefit_sectors", "ai_benefit_stocks", "ai_keywords",
-        "sentiment_label", "operator",
-    }
-    for row in rows:
-        for field in _TEXT_FIELDS:
-            if field in row:
-                row[field] = sanitize_text(row[field])
-
-    # 自动补齐 content_hash
-    for row in rows:
-        if "content_hash" not in row:
-            row["content_hash"] = compute_content_hash(row.get("title"), row.get("content"))
-
-    columns = list(rows[0].keys())
-    col_str = ", ".join([f"`{c}`" for c in columns])
-    placeholders_per_row = "(" + ",".join(["%s"] * len(columns)) + ")"
-
-    def _do_insert(conn) -> int:
-        """执行实际 INSERT，返回插入行数"""
-        total = 0
-        with conn.cursor() as cur:
-            for i in range(0, len(rows), BATCH_SIZE):
-                batch = rows[i : i + BATCH_SIZE]
-                all_placeholders = ",".join([placeholders_per_row] * len(batch))
-                sql = (
-                    f"INSERT IGNORE INTO `{table_name}` ({col_str}) "
-                    f"VALUES {all_placeholders}"
-                )
-                flat_params = [row[c] for row in batch for c in columns]
-                cur.execute(sql, flat_params)
-                total += cur.rowcount
-        conn.commit()
-        return total
-
-    # ─── 主路径：直接写入 ─────────────────────────────────────────
-    conn = get_news_conn()
-    try:
-        return _do_insert(conn)
-
-    except pymysql.err.OperationalError as e:
-        err_code = e.args[0]
-
-        # ── 错误 1049：数据库不存在 ──────────────────────────────
-        if err_code == 1049:
-            print(f"[news_models] 数据库不存在（1049），自动创建 news_data 及表 {table_name} ...")
-            try:
-                from utils.db import init_news_db  # 延迟导入避免循环
-                init_news_db()                      # 建库
-                create_news_table(news_type, year_month)  # 建表
-            except Exception as init_err:
-                print(f"[news_models] 自动初始化失败: {init_err}")
-                return 0
-            # 重试一次（获取新连接，此时库已存在）
-            retry_conn = get_news_conn()
-            try:
-                result = _do_insert(retry_conn)
-                print(f"[news_models] 重试写入成功，插入 {result} 条")
-                return result
-            except Exception as retry_err:
-                retry_conn.rollback()
-                print(f"[news_models] 重试写入仍失败: {retry_err}")
-                return 0
-            finally:
-                retry_conn.close()
-
-        # ── 错误 1146：表不存在 ──────────────────────────────────
-        elif err_code == 1146:
-            print(f"[news_models] 表不存在（1146），自动创建 {table_name} ...")
-            try:
-                create_news_table(news_type, year_month)
-            except Exception as init_err:
-                print(f"[news_models] 自动建表失败: {init_err}")
-                return 0
-            # 重试一次
-            retry_conn = get_news_conn()
-            try:
-                result = _do_insert(retry_conn)
-                print(f"[news_models] 重试写入成功，插入 {result} 条")
-                return result
-            except Exception as retry_err:
-                retry_conn.rollback()
-                print(f"[news_models] 重试写入仍失败: {retry_err}")
-                return 0
-            finally:
-                retry_conn.close()
-
-        # ── 其他 OperationalError：按原有逻辑处理 ────────────────
-        else:
-            conn.rollback()
-            print(f"[news_models] 批量插入失败（OperationalError {err_code}）: {e}")
-            return 0
-
-    except Exception as e:
-        conn.rollback()
-        print(f"[news_models] 批量插入失败: {e}")
-        return 0
-    finally:
-        conn.close()
-
-
-def fetch_news_by_date(news_type: str, year_month: str, date_str: str, limit: int = 100) -> list[dict]:
-    """按日期查询新闻（news_data 连接）"""
-    table_name = get_table_name(news_type, year_month)
-    conn = get_news_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT * FROM `{table_name}` WHERE DATE(publish_time) = %s "
-                f"ORDER BY publish_time DESC LIMIT %s",
-                (date_str, limit)
-            )
-            return cur.fetchall()
-    finally:
-        conn.close()
 
 
 # ─── 量化分析接口 ─────────────────────────────────────────────────

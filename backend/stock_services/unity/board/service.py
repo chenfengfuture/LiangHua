@@ -1,30 +1,38 @@
 # -*- coding: utf-8 -*-
 """
-板块概念模块 - 重构版本
+板块概念模块
 包含板块指数、行业信息、概念信息、股票热度、盘口异动等查询接口
 
-重构说明：
-1. 使用全局异常处理器处理所有异常
-2. 服务函数直接抛出异常，由全局异常处理器捕获
-3. 使用统一的工具函数，避免重复代码
-4. 移除无效的try-except包装
+统一格式：
+1. 所有函数返回统一格式：{"success": bool, "data": list, "message": str}
+2. 使用request_akshare_data进行安全调用和重试
+3. 异常处理：任何错误都返回success=False，不抛出异常
+4. 统一日志记录（logger.info / logger.error）
 """
 
 import logging
-import traceback
 from typing import Any, Dict, List
 
 import akshare as ak
 
-from stock_services.unity.utils import (
-    safe_call_with_retry,
-    _convert_dataframe_to_list,
+from system_service.service_result import error_result, success_result
+from stock_services.unity.utils import request_akshare_data
+from stock_services.utils.board_field_mapper import (
+    map_board_concept_index,
+    map_board_industry_index,
+    map_board_industry_summary,
+    map_board_concept_info,
+    map_stock_hot_follow,
+    map_stock_hot_rank_detail,
+    map_stock_hot_keyword,
+    map_stock_changes,
+    map_board_change
 )
 
 logger = logging.getLogger(__name__)
 
 
-def get_stock_board_concept_index_ths(symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+def get_stock_board_concept_index_ths(params) -> Dict[str, Any]:
     """
     查询同花顺概念板块指数日频率数据
 
@@ -32,40 +40,47 @@ def get_stock_board_concept_index_ths(symbol: str, start_date: str, end_date: st
     目标地址: https://data.10jqka.com.cn/funds/hy/（以实际为准）
 
     Args:
-        symbol: 概念板块名称，如 "阿里巴巴概念"
-        start_date: 开始日期，格式为 "YYYYMMDD"
-        end_date: 结束日期，格式为 "YYYYMMDD"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 概念板块名称，如 "阿里巴巴概念"
+            - start_date (str): 开始日期，格式为 "YYYYMMDD"
+            - end_date (str): 结束日期，格式为 "YYYYMMDD"
 
     Returns:
-        概念板块指数数据列表
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 概念板块指数数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol or not isinstance(symbol, str):
-        # 如果参数验证失败，返回空列表
-        return []
+    symbol = params.get('symbol')
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
     
-    if not start_date or not end_date:
-        # 如果参数验证失败，返回空列表
-        return []
+    logger.info(f"[同花顺概念板块指数] 开始查询 symbol={symbol}, start_date={start_date}, end_date={end_date}")
+
+    # 调用AKShare接口
+    df = request_akshare_data(
+        ak.stock_board_concept_index_ths,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        log_prefix="同花顺概念板块指数"
+    )
+    if not df:
+        return error_result(message=f"[同花顺概念板块指数] symbol={symbol} 查询失败，数据为空")
     
-    # 调用AKShare API
-    try:
-        df = ak.stock_board_concept_index_ths(symbol=symbol, start_date=start_date, end_date=end_date)
-        
-        # 检查数据是否为空
-        if df is None or df.empty:
-            return []
-        
-        # 转换数据格式
-        data_list = _convert_dataframe_to_list(df, "[同花顺概念板块指数]")
-        return data_list
-        
-    except Exception as e:
-        logger.error(f"[同花顺概念板块指数] 查询失败: {symbol}, 错误: {e}")
-        return []
+    logger.info(f"[同花顺概念板块指数] symbol={symbol} 查询成功，数据条数={len(df.get('data', []))}")
+
+    # 应用映射函数
+    result = map_board_concept_index(df)
+    for item in result.get('data', []):
+        item['concept_name'] = symbol
+    print('1111', result.get('data')[0])
+    return result
 
 
-def get_stock_board_industry_summary_ths() -> List[Dict[str, Any]]:
+def get_stock_board_industry_summary_ths(params) -> Dict[str, Any]:
     """
     查询同花顺行业一览表
 
@@ -73,27 +88,37 @@ def get_stock_board_industry_summary_ths() -> List[Dict[str, Any]]:
     目标地址: https://data.10jqka.com.cn/funds/hy/（以实际为准）
     描述: 获取同花顺行业一览表数据
 
+    Args:
+        params: 参数字典（此接口不需要参数，但为了统一格式保留）
+
     Returns:
-        行业一览表数据列表
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 行业一览表数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 调用AKShare API
-    try:
-        df = ak.stock_board_industry_summary_ths()
-        
-        # 检查数据是否为空
-        if df is None or df.empty:
-            return []
-        
-        # 转换数据格式
-        data_list = _convert_dataframe_to_list(df, "[同花顺行业一览表]")
-        return data_list
-        
-    except Exception as e:
-        logger.error(f"[同花顺行业一览表] 查询失败, 错误: {e}")
-        return []
+    logger.info("[同花顺行业一览表] 开始查询")
+    
+    # 调用AKShare接口
+    result = request_akshare_data(
+        ak.stock_board_industry_summary_ths,
+        log_prefix="同花顺行业一览表"
+    )
+    
+    if not result:
+        return error_result(message="[同花顺行业一览表] 查询失败，数据为空")
+    
+    logger.info(f"[同花顺行业一览表] 查询成功，数据条数={len(result.get('data', []))}")
+
+    # 应用映射函数
+    mapped_result = map_board_industry_summary(result)
+    print('111', mapped_result.get('data')[0])
+    return mapped_result
 
 
-def get_stock_board_concept_info_ths(symbol: str) -> Dict[str, Any]:
+def get_stock_board_concept_info_ths(params) -> Dict[str, Any]:
     """
     查询同花顺概念板块简介
     
@@ -102,41 +127,43 @@ def get_stock_board_concept_info_ths(symbol: str) -> Dict[str, Any]:
     描述: 获取同花顺概念板块简介数据
     
     Args:
-        symbol: 概念板块名称，如 "阿里巴巴概念"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 概念板块名称，如 "阿里巴巴概念"
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 概念板块简介数据
+            "message": str        # 成功或错误信息
+        }
     """
+    symbol = params.get('symbol')
+    
+    logger.info(f"[同花顺概念板块简介] 开始查询 symbol={symbol}")
+    
     # 参数验证
     if not symbol:
-        return {
-            "success": False,
-            "data": None,
-            "error": "板块名称不能为空",
-            "symbol": ""
-        }
+        return error_result(message="概念板块名称不能为空")
     
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_board_concept_info_ths,
-        context="同花顺概念板块简介",
-        symbol=symbol
+    # 调用AKShare接口
+    result = request_akshare_data(
+        ak.stock_board_concept_info_ths,
+        symbol=symbol,
+        log_prefix="同花顺概念板块简介"
     )
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": symbol
-        }
+    if not result:
+        return error_result(message=f"[同花顺概念板块简介] symbol={symbol} 查询失败，数据为空")
     
-    return api_result
+    logger.info(f"[同花顺概念板块简介] symbol={symbol} 查询成功，数据条数={len(result.get('data', []))}")
+    
+    # 应用映射函数
+    mapped_result = map_board_concept_info(result)
+    return mapped_result
 
 
-def get_stock_board_industry_index_ths(symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+def get_stock_board_industry_index_ths(params) -> Dict[str, Any]:
     """
     查询同花顺行业板块指数日频率数据
     
@@ -145,45 +172,52 @@ def get_stock_board_industry_index_ths(symbol: str, start_date: str, end_date: s
     描述: 获取同花顺行业板块指数日频率数据
     
     Args:
-        symbol: 行业板块名称，如 "元件"
-        start_date: 开始日期，格式为 "YYYYMMDD"
-        end_date: 结束日期，格式为 "YYYYMMDD"
+        params: 参数字典，包含以下字段：
+            - symbol (str): 行业板块名称，如 "元件"
+            - start_date (str): 开始日期，格式为 "YYYYMMDD"
+            - end_date (str): 结束日期，格式为 "YYYYMMDD"
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 行业板块指数数据
+            "message": str        # 成功或错误信息
+        }
     """
+    symbol = params.get('symbol')
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+    
+    logger.info(f"[同花顺行业板块指数] 开始查询 symbol={symbol}, start_date={start_date}, end_date={end_date}")
+    
     # 参数验证
     if not symbol:
-        return {
-            "success": False,
-            "data": None,
-            "error": "板块名称不能为空",
-            "symbol": ""
-        }
+        return error_result(message="行业板块名称不能为空")
     
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_board_industry_index_ths,
-        context="同花顺行业板块指数",
+    if not start_date or not end_date:
+        return error_result(message="开始日期和结束日期不能为空")
+    
+    # 调用AKShare接口
+    result = request_akshare_data(
+        ak.stock_board_industry_index_ths,
         symbol=symbol,
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        log_prefix="同花顺行业板块指数"
     )
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": symbol
-        }
+    if not result:
+        return error_result(message=f"[同花顺行业板块指数] symbol={symbol} 查询失败，数据为空")
     
-    return api_result
+    logger.info(f"[同花顺行业板块指数] symbol={symbol} 查询成功，数据条数={len(result.get('data', []))}")
+    
+    # 应用映射函数
+    mapped_result = map_board_industry_index(result)
+    return mapped_result
 
 
-def get_stock_hot_follow_xq(symbol: str = "最热门") -> Dict[str, Any]:
+def get_stock_hot_follow_xq(params) -> Dict[str, Any]:
     """
     查询雪球关注排行榜
     
@@ -192,54 +226,40 @@ def get_stock_hot_follow_xq(symbol: str = "最热门") -> Dict[str, Any]:
     描述: 获取雪球关注排行榜数据
     
     Args:
-        symbol: choice of {"本周新增", "最热门"}
+        params: 参数字典，包含以下字段：
+            - symbol (str): 选择类型，可选值: {"本周新增", "最热门"}，默认: "最热门"
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 关注排行榜数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    valid_symbols = ["本周新增", "最热门"]
-    if symbol not in valid_symbols:
-        return {
-            "success": False,
-            "data": None,
-            "error": f"参数必须为以下值之一: {', '.join(valid_symbols)}",
-            "symbol": symbol
-        }
+    symbol = params.get('symbol', '最热门')
     
-    # 调用AKShare API
-    try:
-        df = ak.stock_hot_follow_xq(symbol=symbol)
-        
-        # 检查数据是否为空
-        if df is None or df.empty:
-            return {
-                "success": True,
-                "data": [],
-                "error": None,
-                "symbol": symbol
-            }
-        
-        # 转换数据格式
-        data_list = _convert_dataframe_to_list(df, "[雪球关注排行榜]")
-        return {
-            "success": True,
-            "data": data_list,
-            "error": None,
-            "symbol": symbol
-        }
-        
-    except Exception as e:
-        logger.error(f"[雪球关注排行榜] 查询失败: {symbol}, 错误: {e}")
-        return {
-            "success": False,
-            "data": None,
-            "error": f"查询失败: {str(e)}",
-            "symbol": symbol
-        }
+    logger.info(f"[雪球关注排行榜] 开始查询 symbol={symbol}")
+
+    # 调用AKShare接口
+    result = request_akshare_data(
+        ak.stock_hot_follow_xq,
+        symbol=symbol,
+        log_prefix="雪球关注排行榜"
+    )
+    
+    if not result:
+        return error_result(message=f"[雪球关注排行榜] symbol={symbol} 查询失败，数据为空")
+    
+    logger.info(f"[雪球关注排行榜] symbol={symbol} 查询成功，数据条数={len(result.get('data', []))}")
+    print('mapped_result', result['data'][0])
+    # 应用映射函数
+    mapped_result = map_stock_hot_follow(result)
+
+    return mapped_result
 
 
-def get_stock_hot_rank_detail_em(symbol: str) -> Dict[str, Any]:
+def get_stock_hot_rank_detail_em(params) -> Dict[str, Any]:
     """
     查询东方财富股票热度历史趋势及粉丝特征
     
@@ -248,41 +268,27 @@ def get_stock_hot_rank_detail_em(symbol: str) -> Dict[str, Any]:
     描述: 获取东方财富股票热度历史趋势及粉丝特征数据
     
     Args:
-        symbol: 股票代码，如 "SZ000665"（需带市场前缀）
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票代码，如 "SZ000665"（需带市场前缀）
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 股票热度详情数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol:
-        return {
-            "success": False,
-            "data": None,
-            "error": "股票代码不能为空",
-            "symbol": ""
-        }
+    symbol = params.get('symbol')
     
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_hot_rank_detail_em,
-        context="东方财富股票热度详情",
-        symbol=symbol
-    )
+    logger.info(f"[detail em] 查询成功，数据条数={len(result.get('data', []))}")
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": symbol
-        }
-    
-    return api_result
+    # 应用映射函数
+    mapped_result = map_stock_hot_rank_detail(result)
+    return mapped_result
 
 
-def get_stock_hot_keyword_em(symbol: str) -> Dict[str, Any]:
+def get_stock_hot_keyword_em(params) -> Dict[str, Any]:
     """
     查询东方财富个股人气榜热门关键词
     
@@ -291,41 +297,27 @@ def get_stock_hot_keyword_em(symbol: str) -> Dict[str, Any]:
     描述: 获取东方财富个股人气榜热门关键词数据
     
     Args:
-        symbol: 股票代码，如 "SZ000665"（需带市场前缀）
+        params: 参数字典，包含以下字段：
+            - symbol (str): 股票代码，如 "SZ000665"（需带市场前缀）
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 热门关键词数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol:
-        return {
-            "success": False,
-            "data": None,
-            "error": "股票代码不能为空",
-            "symbol": ""
-        }
+    symbol = params.get('symbol')
     
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_hot_keyword_em,
-        context="东方财富人气榜关键词",
-        symbol=symbol
-    )
+    logger.info(f"[keyword em] 查询成功，数据条数={len(result.get('data', []))}")
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": symbol
-        }
-    
-    return api_result
+    # 应用映射函数
+    mapped_result = map_stock_hot_keyword(result)
+    return mapped_result
 
 
-def get_stock_changes_em(symbol: str) -> Dict[str, Any]:
+def get_stock_changes_em(params) -> Dict[str, Any]:
     """
     查询东方财富盘口异动数据
     
@@ -334,41 +326,27 @@ def get_stock_changes_em(symbol: str) -> Dict[str, Any]:
     描述: 获取东方财富盘口异动数据
     
     Args:
-        symbol: choice of {"火箭发射", "快速反弹", "大笔买入", "封涨停板", "打开跌停板", ...}
+        params: 参数字典，包含以下字段：
+            - symbol (str): 异动类型，可选值: {"火箭发射", "快速反弹", "大笔买入", "封涨停板", "打开跌停板", ...}
         
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": str}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 盘口异动数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 参数验证
-    if not symbol:
-        return {
-            "success": False,
-            "data": None,
-            "error": "异动类型不能为空",
-            "symbol": ""
-        }
+    symbol = params.get('symbol')
     
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_changes_em,
-        context="东方财富盘口异动",
-        symbol=symbol
-    )
+    logger.info(f"[changes em] 查询成功，数据条数={len(result.get('data', []))}")
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": symbol
-        }
-    
-    return api_result
+    # 应用映射函数
+    mapped_result = map_stock_changes(result)
+    return mapped_result
 
 
-def get_stock_board_change_em() -> Dict[str, Any]:
+def get_stock_board_change_em(params) -> Dict[str, Any]:
     """
     查询东方财富当日板块异动详情
     
@@ -376,23 +354,30 @@ def get_stock_board_change_em() -> Dict[str, Any]:
     目标地址: 东方财富网站
     描述: 获取东方财富当日板块异动详情数据
     
+    Args:
+        params: 参数字典（此接口不需要参数，但为了统一格式保留）
+        
     Returns:
-        统一格式的响应字典: {"success": bool, "data": List[Dict[str, Any]] | None, "error": str | None, "symbol": "board_change"}
+        统一格式的响应数据：
+        {
+            "success": bool,      # 调用是否成功
+            "data": list,         # 板块异动详情数据
+            "message": str        # 成功或错误信息
+        }
     """
-    # 调用标准化的AKShare API
-    api_result = call_akshare_api(
-        api_func=ak.stock_board_change_em,
-        context="东方财富板块异动"
+    logger.info("[东方财富板块异动] 开始查询")
+    
+    # 调用AKShare接口
+    result = request_akshare_data(
+        ak.stock_board_change_em,
+        log_prefix="东方财富板块异动"
     )
     
-    # 检查调用是否成功
-    if not api_result.get("success", False):
-        # 如果调用失败，返回失败格式
-        return {
-            "success": False,
-            "data": None,
-            "error": api_result.get("error", "查询失败"),
-            "symbol": "board_change"
-        }
+    if not result:
+        return error_result(message="[东方财富板块异动] 查询失败，数据为空")
     
-    return api_result
+    logger.info(f"[change em] 查询成功，数据条数={len(result.get('data', []))}")
+    
+    # 应用映射函数
+    mapped_result = map_board_change(result)
+    return mapped_result

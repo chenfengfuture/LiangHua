@@ -81,3 +81,29 @@ def get_sh_delist_stocks(
     """查询上海证券交易所暂停/终止上市股票"""
     result = stock_basic_service.get_stock_sh_delist(symbol)
     return result
+
+@router.get("/get-stock-board-concept-index-ths")
+def get_sh_delist_stocks(
+    symbol: str = Query("全部", description="上交所退市股票市场范围，可选值：全部、沪市、科创板，默认：全部"),
+    start_date: str = Query(datetime.now().strftime("%Y%m%d"), description="开始日期，格式为 YYYYMMDD，默认同结束日期"),
+    end_date: str = Query(datetime.now().strftime("%Y%m%d"), description="结束日期，格式为 YYYYMMDD，默认今天"),
+) -> Dict[str, Any]:
+    """ 查询同花顺概念板块指数日频率数据 """
+    result = stock_basic_service.get_stock_board_concept_index_ths_service(symbol, start_date, end_date)
+    return result
+
+
+@router.get("/get-stock-board")
+def get_stock_board_industry_summary_ths_api(
+) -> Dict[str, Any]:
+    """ 查询同花顺行业一览表 """
+    result = stock_basic_service.get_stock_board_industry_summary_ths_service()
+    return result
+
+@router.get("/get-stock-hot_follow_xq")
+def get_stock_hot_follow_xq_service_api(
+    symbol: str = Query("最热门", description="选择类型，可选值: {本周新增, 最热门}，默认: 最热门"),
+) -> Dict[str, Any]:
+    """ 查询同花顺行业一览表 """
+    result = stock_basic_service.get_stock_hot_follow_xq_service(symbol)
+    return result

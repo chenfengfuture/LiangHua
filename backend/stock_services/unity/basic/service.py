@@ -55,7 +55,6 @@ def get_stock_info_em(params) -> Dict[str, Any]:
             data_list.append({"item": item, "value": value})
     else:
         data_list = df.to_dict(orient='records')
-    print('data_list', data_list)
     # 转换为字典格式
     data_dict = {}
     for entry in data_list:

@@ -28,6 +28,19 @@ from stock_services.unity.utils import request_akshare_data
 from system_service.thread_pool import run_concurrent_tasks
 # 导入底层unity接口
 from stock_services.unity.basic import *
+# 导入板块数据接口
+from stock_services.unity.board import (
+    get_stock_board_concept_index_ths,
+    get_stock_board_industry_summary_ths,
+    get_stock_board_concept_info_ths,
+    get_stock_hot_follow_xq,
+    get_stock_board_change_em,
+    get_stock_board_industry_index_ths,
+    get_stock_hot_rank_detail_em,
+    get_stock_hot_keyword_em,
+    get_stock_changes_em
+)
+
 class StockBasicService(BaseStockService):
     """
     股票基础数据服务类
@@ -281,6 +294,299 @@ class StockBasicService(BaseStockService):
             cache_empty=False,
             ttl_redis=self.redis_ttl_more_long,
             ttl_db=90  # 列表数据缓存90天
+        )
+
+    def get_stock_board_concept_index_ths_service(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """
+        查询同花顺概念板块指数日频率数据
+        
+        Args:
+            symbol: 概念板块名称，如 "阿里巴巴概念"
+            start_date: 开始日期，格式为 "YYYYMMDD"
+            end_date: 结束日期，格式为 "YYYYMMDD"
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 概念板块指数数据，已映射到board_concept_index表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="board_concept_index",
+            params={'symbol': symbol, 'start_date': start_date, 'end_date': end_date},
+            fetch_func=get_stock_board_concept_index_ths,
+            validate_rules={
+                "symbol": "no_empty",
+                "start_date": "date",
+                "end_date": "date"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_long,
+            ttl_db=30  # 指数数据缓存30天
+        )
+
+    def get_stock_board_industry_summary_ths_service(self) -> Dict[str, Any]:
+        """
+        查询同花顺行业一览表
+        
+        Args:
+            无参数
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 行业一览表数据，已映射到board_industry_summary表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="board_industry_index",
+            params={},  # 无参数
+            fetch_func=get_stock_board_industry_summary_ths,
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_more_long,
+            ttl_db=90  # 行业列表数据缓存90天
+        )
+
+    def get_stock_board_concept_info_ths_service(self, symbol: str) -> Dict[str, Any]:
+        """
+        查询同花顺概念板块简介
+        
+        Args:
+            symbol: 概念板块名称，如 "阿里巴巴概念"
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 概念板块简介数据，已映射到board_concept_info表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="board_concept_info",
+            params={'symbol': symbol},
+            fetch_func=lambda params: get_stock_board_concept_info_ths(params),
+            validate_rules={
+                "symbol": "required"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_long,
+            ttl_db=90  # 概念信息缓存90天
+        )
+
+    def get_stock_board_industry_index_ths_service(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """
+        查询同花顺行业板块指数日频率数据
+        
+        Args:
+            symbol: 行业板块名称，如 "元件"
+            start_date: 开始日期，格式为 "YYYYMMDD"
+            end_date: 结束日期，格式为 "YYYYMMDD"
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 行业板块指数数据，已映射到board_industry_index表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="board_industry_index",
+            params={'symbol': symbol, 'start_date': start_date, 'end_date': end_date},
+            fetch_func=lambda params: get_stock_board_industry_index_ths(params),
+            validate_rules={
+                "symbol": "required",
+                "start_date": "date",
+                "end_date": "date"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_long,
+            ttl_db=30  # 指数数据缓存30天
+        )
+
+    def get_stock_hot_follow_xq_service(self, symbol: str = "最热门") -> Dict[str, Any]:
+        """
+        查询雪球关注排行榜
+        
+        Args:
+            symbol: 选择类型，可选值: {"本周新增", "最热门"}，默认: "最热门"
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 关注排行榜数据，已映射到stock_hot_follow表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="stock_hot_follow",
+            params={'symbol': symbol},
+            fetch_func=lambda params: get_stock_hot_follow_xq(params),
+            validate_rules={
+                "symbol": ["本周新增", "最热门"]
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_short,
+            ttl_db=7  # 热门数据缓存7天
+        )
+
+    def get_stock_hot_rank_detail_em_service(self, symbol: str) -> Dict[str, Any]:
+        """
+        查询东方财富股票热度历史趋势及粉丝特征
+        
+        Args:
+            symbol: 股票代码，如 "SZ000665"（需带市场前缀）
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 股票热度详情数据，已映射到stock_hot_rank_detail表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 由于底层函数可能不完整，这里使用包装器确保返回正确格式
+        def wrapped_fetch_func(params):
+            result = get_stock_hot_rank_detail_em(params)
+            # 如果底层函数返回的是字典格式，直接返回
+            if isinstance(result, dict) and "success" in result:
+                return result
+            # 否则包装成统一格式
+            from system_service.service_result import success_result
+            return success_result(data=result if isinstance(result, list) else [])
+        
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="stock_hot_rank_detail",
+            params={'symbol': symbol},
+            fetch_func=wrapped_fetch_func,
+            validate_rules={
+                "symbol": "stock_with_prefix"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_short,
+            ttl_db=7  # 热度数据缓存7天
+        )
+
+    def get_stock_hot_keyword_em_service(self, symbol: str) -> Dict[str, Any]:
+        """
+        查询东方财富个股人气榜热门关键词
+        
+        Args:
+            symbol: 股票代码，如 "SZ000665"（需带市场前缀）
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 热门关键词数据，已映射到stock_hot_keyword表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 由于底层函数可能不完整，这里使用包装器确保返回正确格式
+        def wrapped_fetch_func(params):
+            result = get_stock_hot_keyword_em(params)
+            # 如果底层函数返回的是字典格式，直接返回
+            if isinstance(result, dict) and "success" in result:
+                return result
+            # 否则包装成统一格式
+            from system_service.service_result import success_result
+            return success_result(data=result if isinstance(result, list) else [])
+        
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="stock_hot_keyword",
+            params={'symbol': symbol},
+            fetch_func=wrapped_fetch_func,
+            validate_rules={
+                "symbol": "stock_with_prefix"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_short,
+            ttl_db=7  # 关键词数据缓存7天
+        )
+
+    def get_stock_changes_em_service(self, symbol: str) -> Dict[str, Any]:
+        """
+        查询东方财富盘口异动数据
+        
+        Args:
+            symbol: 异动类型，可选值: {"火箭发射", "快速反弹", "大笔买入", "封涨停板", "打开跌停板", ...}
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 盘口异动数据，已映射到stock_changes表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 由于底层函数可能不完整，这里使用包装器确保返回正确格式
+        def wrapped_fetch_func(params):
+            result = get_stock_changes_em(params)
+            # 如果底层函数返回的是字典格式，直接返回
+            if isinstance(result, dict) and "success" in result:
+                return result
+            # 否则包装成统一格式
+            from system_service.service_result import success_result
+            return success_result(data=result if isinstance(result, list) else [])
+        
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="stock_changes",
+            params={'symbol': symbol},
+            fetch_func=wrapped_fetch_func,
+            validate_rules={
+                "symbol": "required"
+            },
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_short,
+            ttl_db=1  # 异动数据缓存1天（实时性要求高）
+        )
+
+    def get_stock_board_change_em_service(self) -> Dict[str, Any]:
+        """
+        查询东方财富当日板块异动详情
+        
+        Args:
+            无参数
+            
+        Returns:
+            统一格式的响应数据：
+            {
+                "success": bool,      # 调用是否成功
+                "data": list,         # 板块异动详情数据，已映射到board_change表结构
+                "message": str        # 成功或错误信息
+            }
+        """
+        # 调用通用模板方法
+        return self.execute_cached_fetch(
+            table_name="board_change",
+            params={},  # 无参数
+            fetch_func=lambda params: get_stock_board_change_em(params),
+            async_write=True,
+            cache_empty=False,
+            ttl_redis=self.redis_ttl_short,
+            ttl_db=1  # 板块异动数据缓存1天（实时性要求高）
         )
 
 

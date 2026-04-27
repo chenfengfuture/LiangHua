@@ -90,10 +90,13 @@ async def lifespan(app: FastAPI):
     db_warmup()
     logger.info("[启动] 数据库连接池预热完成")
 
-    # 1.1 确保所有基础表存在
-    from models.stock_models import ensure_all_base_tables
-    ensure_all_base_tables()
-    logger.info("[启动] 数据库基础表检查完成")
+    # 1.1 确保所有基础表存在（使用统一初始化函数）
+    from models import ensure_all_tables
+    table_result = ensure_all_tables()
+    if table_result["success"]:
+        logger.info(f"[启动] 数据库表创建完成: 成功 {table_result['created']} 个表")
+    else:
+        logger.warning(f"[启动] 数据库表创建异常: {table_result['message']}")
 
     # 2. 行情采集器预热（后台线程）
     from utils.collector import warmup as collector_warmup
@@ -125,24 +128,6 @@ async def lifespan(app: FastAPI):
     logger.info("[启动] 新闻后台任务已启动")
 
     # 7. 初始化通用服务
-    try:
-        from stock_services.services.commont import init_common_services
-        init_results = init_common_services(worker_count=2, max_queue_size=1000)
-        
-        if init_results.get("async_writer", {}).get("success"):
-            logger.info("[启动] 异步写入服务初始化成功")
-        else:
-            logger.warning("[启动] 异步写入服务初始化失败或已存在")
-        
-        if init_results.get("thread_pool", {}).get("success"):
-            logger.info("[启动] 线程池服务初始化成功")
-        else:
-            logger.warning("[启动] 线程池服务初始化失败或已存在")
-            
-    except Exception as e:
-        logger.warning(f"[启动] 通用服务初始化异常: {e}")
-        # 不阻止应用启动，服务会在首次使用时自动初始化
-
     logger.info("应用启动完成")
 
     yield
@@ -159,20 +144,6 @@ async def lifespan(app: FastAPI):
     from utils.redis_client_compat import close_redis
     close_redis()
     logger.info("[关闭] Redis连接已关闭")
-
-    # 3. 关闭通用服务
-    try:
-        from stock_services.services.commont import shutdown_common_services
-        shutdown_results = shutdown_common_services(wait=True)
-        
-        if shutdown_results.get("async_writer", {}).get("success"):
-            logger.info("[关闭] 异步写入服务已关闭")
-        else:
-            logger.warning("[关闭] 异步写入服务关闭异常")
-            
-    except Exception as e:
-        logger.warning(f"[关闭] 通用服务关闭异常: {e}")
-
     logger.info("应用关闭完成")
 
 

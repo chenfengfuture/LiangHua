@@ -227,14 +227,13 @@ class BaseStockService(RedisServiceBase):
             self.logger.error(f"提交异步写入任务时发生异常: {table_name}, 错误: {e}")
             return False
     
-    def write_db_sync(self, table_name: str, data_list: List[Dict[str, Any]], unique_keys: List[str] = None) -> bool:
+    def write_db_sync(self, table_name: str, data_list: List[Dict[str, Any]]) -> bool:
         """
         同步写入数据库
         
         Args:
             table_name: 表名
             data_list: 数据列表
-            unique_keys: 唯一键字段列表
             
         Returns:
             是否成功写入
@@ -242,8 +241,7 @@ class BaseStockService(RedisServiceBase):
         try:
             result = simple_upsert(
                 table_name=table_name,
-                data_list=data_list,
-                unique_keys=unique_keys or ["symbol"]
+                data_list=data_list
             )
             
             success = result.get("success", False)
@@ -258,12 +256,43 @@ class BaseStockService(RedisServiceBase):
             self.logger.error(f"同步写入数据库时发生异常: {table_name}, 错误: {e}")
             return False
 
+    def _validate_not_empty(self, field: str, val: Any) -> None:
+        """
+        规则：必须是字符串 + 不能是空字符串 + 不能全是空格
+        """
+        # 1. 必须是字符串类型
+        if not isinstance(val, str):
+            raise ValidationException(message=f"{field} 必须是字符串类型", details={field: val})
+
+        # 2. 不能是空/空白字符串
+        if not val.strip():
+            raise ValidationException(message=f"{field} 不能为空或空白字符", details={field: val})
+
+    def _validate_date_yyyymmdd(self, field: str, val: Any) -> None:
+        """
+        自定义验证：日期必须是 8 位字符串，格式 YYYYMMDD
+        例如：20250411
+        """
+        # 1. 必须是字符串
+        if not isinstance(val, str):
+            raise ValidationException(message=f"{field} 必须是字符串格式", details={field: val})
+
+        # 2. 必须是 8 位
+        if len(val) != 8:
+            raise ValidationException(message=f"{field} 必须是 8 位数字，格式：YYYYMMDD", details={field: val})
+
+        # 3. 必须全部是数字
+        if not val.isdigit():
+            raise ValidationException(message=f"{field} 必须是纯数字，格式：YYYYMMDD", details={field: val})
+
+
     def _validate_stock_symbol(self, field: str, val: Any) -> None:
         """股票代码专用验证：必须 6 位数字"""
         if not val:
             raise ValidationException(message=f"{field} 不能为空", details={field: val})
         if not (isinstance(val, str) and len(val) == 6 and val.isdigit()):
             raise ValidationException(message=f"{field} 必须是 6 位数字股票代码", details={field: val})
+
 
     def _validate_enum(self, field: str, value: Any, val: List) -> None:
         """
@@ -286,6 +315,7 @@ class BaseStockService(RedisServiceBase):
     def validate(self, val, field: str, rule: Any)-> Dict[str, Any]:
         """
         🔥 统一验证入口（万能简化版）
+
         :param val: 参数
         :param field: 参数字段名
         :param rule: 规则
@@ -299,6 +329,10 @@ class BaseStockService(RedisServiceBase):
         # 2. 枚举列表验证
         elif isinstance(rule, list):
             self._validate_enum(field, val, rule)
+        elif rule == "no_empty":
+            self._validate_not_empty(field, val)
+        elif rule == "date":
+            self._validate_date_yyyymmdd(field, val)
         # 3. 自定义函数验证（可扩展）
         elif callable(rule):
             rule(val)
@@ -461,8 +495,7 @@ class BaseStockService(RedisServiceBase):
                 # 注意：此处 table_name 硬编码为 "stocks_info"，只适用于股票信息场景
                 write_success = self.write_db_sync(
                     table_name="stocks_info",
-                    data_list=[data] if isinstance(data, dict) else data,
-                    unique_keys=["symbol"]
+                    data_list=[data] if isinstance(data, dict) else data
                 )
                 
                 if not write_success:

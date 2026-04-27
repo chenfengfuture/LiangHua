@@ -7,7 +7,6 @@
 1. 任意表的批量 upsert
 2. 字段自动过滤（删除不属于目标表的字段）
 3. 类型自动转换（基于表结构）
-4. 行级锁（或分布式锁）防止并发冲突
 
 设计原则：
 - 使用项目现有的数据库连接池（utils.db）
@@ -18,7 +17,6 @@
 
 import logging
 import threading
-import time
 from typing import Dict, Any, List, Optional, Tuple, Set
 from copy import deepcopy
 
@@ -33,28 +31,11 @@ class DBService:
     数据库写入服务类
     """
     
-    def __init__(self, use_lock: bool = True, lock_timeout: int = 30):
+    def __init__(self):
         """
         初始化数据库服务
-        
-        Args:
-            use_lock: 是否使用分布式锁，默认True
-            lock_timeout: 锁超时时间（秒），默认30秒
         """
-        self.use_lock = use_lock
-        self.lock_timeout = lock_timeout
         self.logger = logger
-        
-        # 获取Redis客户端（用于分布式锁）
-        self.redis_client = None
-        if use_lock:
-            try:
-                from utils.redis_client_compat import _get_client
-                self.redis_client = _get_client()
-                self.logger.info("Redis客户端初始化成功，启用分布式锁")
-            except Exception as e:
-                self.logger.warning(f"Redis客户端初始化失败，禁用分布式锁: {e}")
-                self.use_lock = False
         
         # 获取表结构缓存
         self.schema_cache = get_schema_cache()
@@ -65,18 +46,33 @@ class DBService:
             # 例如："stocks_info": "CREATE TABLE IF NOT EXISTS `stocks_info` (...)"
         }
         
-        logger.info(f"数据库写入服务初始化完成，使用锁: {use_lock}")
-    
-    def upsert_data_with_schema(self, table_name: str, data_list: List[Dict[str, Any]], 
-                               unique_keys: List[str], use_lock: bool = True) -> Dict[str, Any]:
+        logger.info("数据库写入服务初始化完成")
+
+    def get_table_primary_keys(self, table_name: str) -> list:
+        """自动查询 MySQL 表主键字段"""
+        conn = get_conn()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = %s
+                      AND CONSTRAINT_NAME = 'PRIMARY'
+                    ORDER BY ORDINAL_POSITION
+                """, (table_name,))
+                rows = cursor.fetchall()
+                return [row["COLUMN_NAME"] for row in rows] if rows else []
+        finally:
+            conn.close()
+
+    def upsert_data_with_schema(self, table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         批量upsert数据（带字段过滤和类型转换）
         
         Args:
             table_name: 表名
             data_list: 数据列表（每个元素是字典）
-            unique_keys: 唯一键字段列表
-            use_lock: 是否使用锁，默认True
             
         Returns:
             统一格式的结果：{"success": bool, "data": {"inserted": int, "updated": int}, "message": str}
@@ -87,19 +83,17 @@ class DBService:
                 "data": {"inserted": 0, "updated": 0},
                 "message": "数据列表为空，跳过写入"
             }
-        
-        # 验证唯一键
+
+        unique_keys = self.get_table_primary_keys(table_name)
         if not unique_keys:
             return {
                 "success": False,
                 "data": None,
-                "message": "必须指定唯一键字段"
+                "message": f"表 {table_name} 未找到主键，无法执行UPSERT"
             }
-        
         try:
             # 深拷贝数据，避免修改原始数据
             data_to_process = deepcopy(data_list)
-            
             # 1. 字段过滤和类型转换
             processed_data = []
             for record in data_to_process:
@@ -107,10 +101,9 @@ class DBService:
 
                 # 验证唯一键字段是否存在
                 missing_keys = [key for key in unique_keys if key not in filtered_record]
-                if missing_keys:
-                    self.logger.warning(f"记录缺少唯一键字段 {missing_keys}，跳过: {filtered_record}")
-                    continue
-                
+                # if missing_keys:
+                #     self.logger.warning(f"记录缺少唯一键字段 {missing_keys}，跳过: {filtered_record}")
+                #     continue
                 processed_data.append(filtered_record)
             
             if not processed_data:
@@ -120,23 +113,8 @@ class DBService:
                     "message": "所有记录都缺少唯一键字段，没有数据可写入"
                 }
             
-            # 2. 获取锁（如果需要）
-            lock_keys = []
-            if use_lock and self.use_lock and self.redis_client:
-                lock_keys = self._acquire_locks(table_name, processed_data, unique_keys)
-                if lock_keys is None:
-                    return {
-                        "success": False,
-                        "data": None,
-                        "message": "获取分布式锁失败"
-                    }
-            
-            # 3. 执行upsert
+            # 2. 执行upsert（不再使用分布式锁）
             inserted_count, updated_count = self._execute_upsert(table_name, processed_data, unique_keys)
-            
-            # 4. 释放锁（如果获取了）
-            if lock_keys:
-                self._release_locks(lock_keys)
             
             return {
                 "success": True,
@@ -152,68 +130,7 @@ class DBService:
                 "message": f"写入失败: {str(e)}"
             }
     
-    def _acquire_locks(self, table_name: str, data_list: List[Dict[str, Any]], 
-                      unique_keys: List[str]) -> Optional[List[str]]:
-        """
-        获取分布式锁
-        
-        Args:
-            table_name: 表名
-            data_list: 数据列表
-            unique_keys: 唯一键字段列表
-            
-        Returns:
-            锁键列表，如果获取失败返回None
-        """
-        lock_keys = []
-        
-        for record in data_list:
-            # 构建锁键：table_name:unique_key1_value:unique_key2_value...
-            lock_key_parts = [table_name]
-            for key in unique_keys:
-                if key in record:
-                    lock_key_parts.append(str(record[key]))
-            
-            lock_key = ":".join(lock_key_parts)
-            
-            # 尝试获取锁
-            try:
-                # 使用SET NX EX命令获取锁
-                result = self.redis_client.set(
-                    lock_key,
-                    str(time.time()),
-                    nx=True,
-                    ex=self.lock_timeout
-                )
-                
-                if result:
-                    lock_keys.append(lock_key)
-                else:
-                    # 锁获取失败，释放已获取的锁并返回失败
-                    self.logger.warning(f"获取锁失败: {lock_key}")
-                    self._release_locks(lock_keys)
-                    return None
-                    
-            except Exception as e:
-                self.logger.error(f"获取锁异常: {lock_key}, 错误: {e}")
-                self._release_locks(lock_keys)
-                return None
-        
-        self.logger.debug(f"成功获取 {len(lock_keys)} 个分布式锁")
-        return lock_keys
 
-    def _release_locks(self, lock_keys: List[str]) -> None:
-        """
-        释放分布式锁
-
-        Args:
-            lock_keys: 锁键列表
-        """
-        for lock_key in lock_keys:
-            try:
-                self.redis_client.delete(lock_key)
-            except Exception as e:
-                self.logger.error(f"释放锁异常: {lock_key}, 错误: {e}")
 
     def _execute_upsert(self, table_name: str, data_list: List[Dict[str, Any]],
                         unique_keys: List[str]) -> Tuple[int, int]:
@@ -270,20 +187,18 @@ class DBService:
         except Exception as e:
             self.logger.error(f"写入表 {table_name} 失败: {e}")
             raise
-    def simple_upsert(self, table_name: str, data_list: List[Dict[str, Any]], 
-                     unique_keys: List[str]) -> Dict[str, Any]:
+    def simple_upsert(self, table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        简化的upsert接口（不带锁）
+        简化的upsert接口
         
         Args:
             table_name: 表名
             data_list: 数据列表
-            unique_keys: 唯一键字段列表
             
         Returns:
             统一格式的结果
         """
-        return self.upsert_data_with_schema(table_name, data_list, unique_keys, use_lock=False)
+        return self.upsert_data_with_schema(table_name, data_list)
 
     def create_table_if_not_exists(self, table_name: str) -> None:
         """
@@ -422,16 +337,14 @@ __all__ = [
 
 
 # 便捷函数
-def upsert_data_with_schema(table_name: str, data_list: List[Dict[str, Any]], 
-                           unique_keys: List[str], use_lock: bool = True) -> Dict[str, Any]:
+def upsert_data_with_schema(table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     """批量upsert数据（便捷函数）"""
-    return get_db_service().upsert_data_with_schema(table_name, data_list, unique_keys, use_lock)
+    return get_db_service().upsert_data_with_schema(table_name, data_list)
 
 
-def simple_upsert(table_name: str, data_list: List[Dict[str, Any]], 
-                 unique_keys: List[str]) -> Dict[str, Any]:
+def simple_upsert(table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     """简化的upsert接口（便捷函数）"""
-    return get_db_service().simple_upsert(table_name, data_list, unique_keys)
+    return get_db_service().simple_upsert(table_name, data_list)
 
 
 def create_table_if_not_exists(table_name: str) -> None:

@@ -38,13 +38,11 @@ class WriteTask:
     属性：
         table_name: 表名
         data_list: 数据列表
-        unique_keys: 唯一键字段列表
         submit_time: 提交时间戳
         retry_count: 重试次数
     """
     table_name: str
     data_list: List[Dict[str, Any]]
-    unique_keys: List[str]
     submit_time: float = None
     retry_count: int = 0
     
@@ -104,14 +102,13 @@ class AsyncWriter:
         self.logger.info(f"异步写入服务初始化完成，队列大小: {max_queue_size}，工作线程: {worker_count}")
     
     def submit_async_upsert(self, table_name: str, data_list: List[Dict[str, Any]], 
-                           unique_keys: List[str]) -> bool:
+                           ) -> bool:
         """
         提交异步upsert任务
         
         Args:
             table_name: 表名
             data_list: 数据列表
-            unique_keys: 唯一键字段列表
             
         Returns:
             True: 任务提交成功（已加入队列）
@@ -126,8 +123,8 @@ class AsyncWriter:
             return True
         
         # 验证参数
-        if not table_name or not unique_keys:
-            self.logger.error("参数验证失败: table_name或unique_keys为空")
+        if not table_name:
+            self.logger.error("参数验证失败: table_name 不能为空")
             return False
         
         try:
@@ -138,7 +135,6 @@ class AsyncWriter:
             task = WriteTask(
                 table_name=table_name,
                 data_list=data_to_write,
-                unique_keys=unique_keys
             )
             
             # 尝试将任务放入队列（非阻塞）
@@ -227,8 +223,6 @@ class AsyncWriter:
             result = db_service.upsert_data_with_schema(
                 table_name=task.table_name,
                 data_list=task.data_list,
-                unique_keys=task.unique_keys,
-                use_lock=True
             )
             
             if not result.get("success", False):
@@ -332,12 +326,11 @@ def submit_async_upsert(table_name: str, data_list: List[Dict[str, Any]],
     Args:
         table_name: 表名
         data_list: 数据列表
-        unique_keys: 唯一键字段列表
         
     Returns:
         是否成功提交任务
     """
-    return get_async_writer().submit_async_upsert(table_name, data_list, unique_keys)
+    return get_async_writer().submit_async_upsert(table_name, data_list)
 
 
 def shutdown_async_writer() -> None:
