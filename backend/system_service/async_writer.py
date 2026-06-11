@@ -38,11 +38,15 @@ class WriteTask:
     属性：
         table_name: 表名
         data_list: 数据列表
+        db_name: 数据库名称
+        unique_keys: 唯一键字段列表（兼容参数）
         submit_time: 提交时间戳
         retry_count: 重试次数
     """
     table_name: str
     data_list: List[Dict[str, Any]]
+    db_name: str = "lianghua"
+    unique_keys: Optional[List[str]] = None
     submit_time: float = None
     retry_count: int = 0
     
@@ -101,14 +105,16 @@ class AsyncWriter:
         
         self.logger.info(f"异步写入服务初始化完成，队列大小: {max_queue_size}，工作线程: {worker_count}")
     
-    def submit_async_upsert(self, table_name: str, data_list: List[Dict[str, Any]], 
-                           ) -> bool:
+    def submit_async_upsert(self, table_name: str, data_list: List[Dict[str, Any]],
+                            unique_keys: List[str] = None, db_name: str = "lianghua") -> bool:
         """
         提交异步upsert任务
         
         Args:
             table_name: 表名
             data_list: 数据列表
+            unique_keys: 唯一键字段列表（兼容参数，实际写入仍以表主键/唯一键为准）
+            db_name: 数据库名称，默认 "lianghua"
             
         Returns:
             True: 任务提交成功（已加入队列）
@@ -135,6 +141,8 @@ class AsyncWriter:
             task = WriteTask(
                 table_name=table_name,
                 data_list=data_to_write,
+                db_name=db_name,
+                unique_keys=unique_keys,
             )
             
             # 尝试将任务放入队列（非阻塞）
@@ -145,13 +153,13 @@ class AsyncWriter:
                 self.stats["submitted_tasks"] += 1
                 self.stats["queue_size"] = self.task_queue.qsize()
                 
-                self.logger.debug(f"异步写入任务提交成功: {table_name}, 数据量: {len(data_to_write)}")
+                self.logger.debug(f"异步写入任务提交成功: {table_name}, 数据量: {len(data_to_write)}, 库={db_name}")
                 return True
                 
             except queue.Full:
                 # 队列满，记录错误
                 self.stats["queue_full_count"] += 1
-                self.logger.error(f"异步写入队列已满，任务提交失败: {table_name}, 队列大小: {self.max_queue_size}")
+                self.logger.error(f"异步写入队列已满，任务提交失败: {table_name}, 库={db_name}, 队列大小: {self.max_queue_size}")
                 return False
                 
         except Exception as e:
@@ -223,6 +231,7 @@ class AsyncWriter:
             result = db_service.upsert_data_with_schema(
                 table_name=task.table_name,
                 data_list=task.data_list,
+                db_name=task.db_name,
             )
             
             if not result.get("success", False):
@@ -230,7 +239,7 @@ class AsyncWriter:
             
             # 记录处理时间
             elapsed_time = time.time() - start_time
-            self.logger.debug(f"异步写入任务处理完成: {task.table_name}, 数据量: {len(task.data_list)}, 耗时: {elapsed_time:.2f}秒")
+            self.logger.debug(f"异步写入任务处理完成: {task.table_name}, 数据量: {len(task.data_list)}, 库={task.db_name}, 耗时: {elapsed_time:.2f}秒")
             
         except Exception as e:
             # 重新抛出异常，由调用方处理重试逻辑
@@ -318,19 +327,26 @@ def get_async_writer() -> AsyncWriter:
 
 
 # 便捷函数
-def submit_async_upsert(table_name: str, data_list: List[Dict[str, Any]], 
-                       unique_keys: List[str]) -> bool:
+def submit_async_upsert(table_name: str, data_list: List[Dict[str, Any]],
+                       unique_keys: List[str] = None, db_name: str = "lianghua") -> bool:
     """
     提交异步upsert任务（便捷函数）
     
     Args:
         table_name: 表名
         data_list: 数据列表
+        unique_keys: 唯一键字段列表（兼容参数）
+        db_name: 数据库名称，默认 "lianghua"
         
     Returns:
         是否成功提交任务
     """
-    return get_async_writer().submit_async_upsert(table_name, data_list)
+    return get_async_writer().submit_async_upsert(
+        table_name=table_name,
+        data_list=data_list,
+        unique_keys=unique_keys,
+        db_name=db_name
+    )
 
 
 def shutdown_async_writer() -> None:

@@ -8,20 +8,16 @@
 2. 字段自动过滤（删除不属于目标表的字段）
 3. 类型自动转换（基于表结构）
 
-设计原则：
-- 使用项目现有的数据库连接池（utils.db）
-- 统一返回格式：{success: bool, data: any, message: str}
-- 内部捕获异常，记录日志
-- 支持事务和批量操作
 """
 
 import logging
 import re
 import threading
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set
 from copy import deepcopy
 
-from utils.db import get_cursor, get_conn
+from utils.db import get_cursor, get_conn, get_news_conn
 from .schema_cache import get_schema_cache
 
 logger = logging.getLogger(__name__)
@@ -44,6 +40,28 @@ class DBService:
         # 表DDL映射字典（可根据需要扩展）
         self.logger.info("数据库写入服务初始化完成")
         logger.info("数据库写入服务初始化完成")
+
+    def _validate_identifier(self, name: str) -> bool:
+        """
+        校验 SQL 标识符（库名、表名、字段名）。
+
+        MySQL 不支持对库名/表名使用参数化占位符，因此所有用于 SQL 拼接的
+        标识符必须先经过白名单校验，避免注入风险。
+        """
+        return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name or ""))
+
+    def _quote_identifier(self, name: str) -> str:
+        """校验并反引号包裹 SQL 标识符。"""
+        if not self._validate_identifier(name):
+            raise ValueError(f"非法SQL标识符: {name}")
+        return f"`{name}`"
+
+    def _quote_table_name(self, table_name: str) -> str:
+        """校验并生成表名限定表达式，支持 db.table。"""
+        if "." in table_name:
+            schema, tbl = table_name.split(".", 1)
+            return f"{self._quote_identifier(schema)}.{self._quote_identifier(tbl)}"
+        return self._quote_identifier(table_name)
 
     def get_table_primary_keys(self, table_name: str) -> list:
         """
@@ -186,49 +204,190 @@ class DBService:
             return m.group(1)
         return None
 
-    def _resolve_table_qualified_name(self, table_name: str) -> str:
+    def _resolve_table_qualified_name(self, table_name: str, db_name: str = "lianghua") -> str:
         """
         解析表名为限定名（自动发现数据库前缀）。
 
         优先级：
-        1. _locate_table_database — 表已存在，从 information_schema 发现
-        2. _extract_database_from_ddl — 表不存在，从 DDL 中解析
-        3. 兜底 — 使用默认库（不添加前缀）
+        1. table_name 已经是 db.table — 校验后直接返回
+        2. db_name 非默认库 — 使用调用方显式指定的数据库
+        3. _locate_table_database — 表已存在，从 information_schema 发现
+        4. _extract_database_from_ddl — 表不存在，从 DDL 中解析
+        5. 兜底 — 使用默认库（不添加前缀）
 
         Args:
-            table_name: 纯表名
+            table_name: 纯表名或 db.table 限定名
+            db_name: 数据库名称，默认 lianghua
 
         Returns:
             限定表名（"db.table" 或纯 "table"）
         """
+        if not table_name:
+            raise ValueError("table_name 不能为空")
+
         if "." in table_name:
-            return table_name  # 已经是限定名
+            schema, tbl = table_name.split(".", 1)
+            self._quote_identifier(schema)
+            self._quote_identifier(tbl)
+            return table_name
+
+        self._quote_identifier(table_name)
+        self._quote_identifier(db_name)
+
+        if db_name != "lianghua":
+            return f"{db_name}.{table_name}"
 
         # 优先级1：表已存在 → 从 information_schema 发现
-        db_name = self._locate_table_database(table_name)
-        if db_name:
-            self.logger.info(f"自动发现表 {table_name} 位于数据库 {db_name}")
-            return f"{db_name}.{table_name}"
+        located_db_name = self._locate_table_database(table_name)
+        if located_db_name:
+            self._quote_identifier(located_db_name)
+            self.logger.info(f"自动发现表 {table_name} 位于数据库 {located_db_name}")
+            return f"{located_db_name}.{table_name}"
 
         # 优先级2：表不存在 → 从 DDL 中解析
-        db_name = self._extract_database_from_ddl(table_name)
-        if db_name:
-            self.logger.info(f"从 DDL 解析到表 {table_name} 应位于数据库 {db_name}")
-            return f"{db_name}.{table_name}"
+        ddl_db_name = self._extract_database_from_ddl(table_name)
+        if ddl_db_name:
+            self._quote_identifier(ddl_db_name)
+            self.logger.info(f"从 DDL 解析到表 {table_name} 应位于数据库 {ddl_db_name}")
+            return f"{ddl_db_name}.{table_name}"
 
         # 优先级3：兜底，使用默认库
         return table_name
 
+    def query_db_cache(self, table_name: str, cache_key: str, ttl_days: int = 1, db_name: str = "lianghua") -> Optional[List[Dict[str, Any]]]:
+        """
+        查询数据库缓存
 
+        修复说明：原实现使用 `LIMIT 1 + fetchone()` 只返回单条 dict，
+        导致同一 cache_key 下存在多行（如龙虎榜 576 行）时被截断为 1 条，
+        前端 Ant Design Table 的 dataSource 收到 dict 而非 list，崩溃黑屏。
 
+        现修改为 `fetchall()` 返回 List[Dict]，对外契约保持 Optional：
+        - 命中且有数据 → 返回 list（即使只有 1 条也是 [dict]）
+        - 未命中或已过期 → 返回 None
 
-    def upsert_data_with_schema(self, table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        多库支持：根据 db_name 切换数据库连接。
+        - "lianghua"（默认）：使用主库连接池 get_conn()
+        - "news_data"：使用新闻库连接池 get_news_conn()
+        - 其他：使用主库连接池，表名限定为 `db_name`.`table_name` 实现跨库查询
+        """
+        try:
+            if not table_name:
+                self.logger.warning(f"表名不能为空: {cache_key}")
+                return None
+
+            self._quote_identifier(table_name)
+            self._quote_identifier(db_name)
+
+            # 根据 db_name 选择数据库连接
+            if db_name == "news_data":
+                conn = get_news_conn()
+                qualified_table = self._quote_identifier(table_name)
+            elif db_name != "lianghua":
+                # 非默认库，使用主连接池 + 限定表名 `db_name`.`table_name`
+                conn = get_conn()
+                qualified_table = f"{self._quote_identifier(db_name)}.{self._quote_identifier(table_name)}"
+            else:
+                conn = get_conn()
+                qualified_table = self._quote_identifier(table_name)
+
+            with conn.cursor() as cursor:
+                ttl_date = datetime.now() - timedelta(days=ttl_days)
+                query = f"""
+                    SELECT * FROM {qualified_table}
+                    WHERE cache_key = %s AND update_time >= %s
+                    ORDER BY update_time DESC
+                """
+
+                cursor.execute(query, (cache_key, ttl_date))
+                results = cursor.fetchall()
+
+                if results:
+                    self.logger.debug(f"数据库缓存命中: {cache_key} 表={table_name}, 行数={len(results)}, 库={db_name}")
+                    return [dict(r) for r in results]
+                else:
+                    self.logger.debug(f"数据库缓存未命中或已过期: {cache_key}, 库={db_name}")
+                    return None
+
+        except Exception as e:
+            self.logger.error(f"查询数据库缓存异常: {cache_key}, 错误: {str(e)}, 库={db_name}")
+            return None
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+    def write_db_async(self, table_name: str, data_list: List[Dict[str, Any]], unique_keys: List[str] = None, db_name: str = "lianghua") -> bool:
+        """
+        异步写入数据库
+
+        Args:
+            table_name: 表名
+            data_list: 数据列表
+            unique_keys: 唯一键字段列表；默认 ["symbol"] 仅作为股票行情类数据兜底，非股票表应显式传入
+            db_name: 数据库名称，默认 "lianghua"
+
+        Returns:
+            是否成功提交异步写入任务
+        """
+        try:
+            from .async_writer import submit_async_upsert
+
+            success = submit_async_upsert(
+                table_name=table_name,
+                data_list=data_list,
+                unique_keys=unique_keys or ["symbol"],
+                db_name=db_name
+            )
+
+            if success:
+                self.logger.debug(f"成功提交异步写入任务: {table_name}, 数据条数: {len(data_list)}, 库={db_name}")
+            else:
+                self.logger.warning(f"提交异步写入任务失败: {table_name}, 库={db_name}")
+
+            return success
+        except Exception as e:
+            self.logger.error(f"提交异步写入任务时发生异常: {table_name}, 错误: {e}, 库={db_name}")
+            return False
+
+    def write_db_sync(self, table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> bool:
+        """
+        同步写入数据库
+
+        Args:
+            table_name: 表名
+            data_list: 数据列表
+            db_name: 数据库名称，默认 "lianghua"
+
+        Returns:
+            是否成功写入
+        """
+        try:
+            result = self.simple_upsert(
+                table_name=table_name,
+                data_list=data_list,
+                db_name=db_name
+            )
+
+            success = result.get("success", False)
+
+            if success:
+                self.logger.debug(f"成功同步写入数据库: {table_name}, 数据条数: {len(data_list)}, 库={db_name}")
+            else:
+                self.logger.warning(f"同步写入数据库失败: {table_name}, 错误: {result.get('message', '未知错误')}, 库={db_name}")
+
+            return success
+        except Exception as e:
+            self.logger.error(f"同步写入数据库时发生异常: {table_name}, 错误: {e}, 库={db_name}")
+            return False
+
+    def upsert_data_with_schema(self, table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> Dict[str, Any]:
         """
         批量upsert数据（带字段过滤和类型转换）
 
         Args:
             table_name: 表名
             data_list: 数据列表（每个元素是字典）
+            db_name: 数据库名称，默认 "lianghua"
 
         Returns:
             统一格式的结果：{"success": bool, "data": {"inserted": int, "updated": int}, "message": str}
@@ -240,8 +399,8 @@ class DBService:
                 "message": "数据列表为空，跳过写入"
             }
 
-        # 自动发现表所在数据库（解决 DDL 定义在非默认库的问题）
-        effective_table = self._resolve_table_qualified_name(table_name)
+        # 自动发现表所在数据库（解决 DDL 定义在非默认库的问题），显式 db_name 优先
+        effective_table = self._resolve_table_qualified_name(table_name, db_name=db_name)
 
         unique_keys = self.get_table_primary_keys(effective_table)
         if not unique_keys:
@@ -334,12 +493,8 @@ class DBService:
             # 若无可更新字段，可改用 INSERT IGNORE 或直接报错，此处简单返回
             return len(data_list), 0
 
-        # 支持 "db.table" 形式：必须分别加反引号 → `db`.`table`
-        if "." in table_name:
-            schema, tbl = table_name.split(".", 1)
-            qualified = f"`{schema}`.`{tbl}`"
-        else:
-            qualified = f"`{table_name}`"
+        # 支持 "db.table" 形式：必须分别校验并加反引号 → `db`.`table`
+        qualified = self._quote_table_name(table_name)
 
         sql = f"""
             INSERT INTO {qualified} ({cols_quoted})
@@ -365,18 +520,19 @@ class DBService:
         except Exception as e:
             self.logger.error(f"写入表 {table_name} 失败: {e}")
             raise
-    def simple_upsert(self, table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def simple_upsert(self, table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> Dict[str, Any]:
         """
         简化的upsert接口
         
         Args:
             table_name: 表名
             data_list: 数据列表
+            db_name: 数据库名称，默认 "lianghua"
             
         Returns:
             统一格式的结果
         """
-        return self.upsert_data_with_schema(table_name, data_list)
+        return self.upsert_data_with_schema(table_name, data_list, db_name=db_name)
 
     def create_table_if_not_exists(self, table_name: str) -> None:
         """
@@ -505,14 +661,14 @@ __all__ = [
 
 
 # 便捷函数
-def upsert_data_with_schema(table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+def upsert_data_with_schema(table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> Dict[str, Any]:
     """批量upsert数据（便捷函数）"""
-    return get_db_service().upsert_data_with_schema(table_name, data_list)
+    return get_db_service().upsert_data_with_schema(table_name, data_list, db_name=db_name)
 
 
-def simple_upsert(table_name: str, data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+def simple_upsert(table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> Dict[str, Any]:
     """简化的upsert接口（便捷函数）"""
-    return get_db_service().simple_upsert(table_name, data_list)
+    return get_db_service().simple_upsert(table_name, data_list, db_name=db_name)
 
 
 def create_table_if_not_exists(table_name: str) -> None:

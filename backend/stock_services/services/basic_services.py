@@ -26,15 +26,14 @@ import pandas_market_calendars as mcal
 from system_service import (
     success_result,
     error_result,
-    submit_async_upsert,
-    simple_upsert,
 )
+from system_service.db_service import get_db_service
 
 # 导入 Redis 服务基类
 from system_service.redis_service import RedisServiceBase
 
 # 导入工具层
-from utils.db import get_conn, get_cursor
+from utils.db import get_cursor
 
 # 缓存 Key 统一构建
 from stock_services.common.cache import CacheKeyBuilder
@@ -147,133 +146,30 @@ class BaseStockService(RedisServiceBase):
         return self._release_lock(lock_key)
 
     def query_db_cache(self, table_name: str, cache_key: str, ttl_days: int = 1, db_name: str = "lianghua") -> Optional[List[Dict[str, Any]]]:
-        """
-        查询数据库缓存
-
-        修复说明：原实现使用 `LIMIT 1 + fetchone()` 只返回单条 dict，
-        导致同一 cache_key 下存在多行（如龙虎榜 576 行）时被截断为 1 条，
-        前端 Ant Design Table 的 dataSource 收到 dict 而非 list，崩溃黑屏。
-
-        现修改为 `fetchall()` 返回 List[Dict]，对外契约保持 Optional：
-        - 命中且有数据 → 返回 list（即使只有 1 条也是 [dict]）
-        - 未命中或已过期 → 返回 None
-
-        多库支持：根据 db_name 切换数据库连接。
-        - "lianghua"（默认）：使用主库连接池 get_conn()
-        - "news_data"：使用新闻库连接池 get_news_conn()
-        - 其他：使用主库连接池，表名限定为 `db_name`.`table_name` 实现跨库查询
-        """
-        try:
-            if not table_name:
-                self.logger.warning(f"表名不能为空: {cache_key}")
-                return None
-
-            # 根据 db_name 选择数据库连接
-            if db_name == "news_data":
-                from utils.db import get_news_conn
-                conn = get_news_conn()
-                qualified_table = f"`{table_name}`"
-            elif db_name != "lianghua":
-                # 非默认库，使用主连接池 + 限定表名 `db_name`.`table_name`
-                conn = get_conn()
-                qualified_table = f"`{db_name}`.`{table_name}`"
-            else:
-                conn = get_conn()
-                qualified_table = f"`{table_name}`"
-
-            with conn.cursor() as cursor:
-                ttl_date = datetime.now() - timedelta(days=ttl_days)
-                query = f"""
-                    SELECT * FROM {qualified_table} 
-                    WHERE cache_key = %s AND update_time >= %s
-                    ORDER BY update_time DESC
-                """
-
-                cursor.execute(query, (cache_key, ttl_date))
-                results = cursor.fetchall()
-
-                if results:
-                    self.logger.debug(f"数据库缓存命中: {cache_key} 表={table_name}, 行数={len(results)}, 库={db_name}")
-                    return [dict(r) for r in results]
-                else:
-                    self.logger.debug(f"数据库缓存未命中或已过期: {cache_key}, 库={db_name}")
-                    return None
-
-        except Exception as e:
-            self.logger.error(f"查询数据库缓存异常: {cache_key}, 错误: {str(e)}, 库={db_name}")
-            return None
-        finally:
-            if 'conn' in locals():
-                conn.close()
+        """查询数据库缓存（兼容代理，实际实现位于 DBService）。"""
+        return get_db_service().query_db_cache(
+            table_name=table_name,
+            cache_key=cache_key,
+            ttl_days=ttl_days,
+            db_name=db_name
+        )
 
     def write_db_async(self, table_name: str, data_list: List[Dict[str, Any]], unique_keys: List[str] = None, db_name: str = "lianghua") -> bool:
-        """
-        异步写入数据库
-
-        db_name 仅用于选择连接池（"news_data" 使用独立连接池），
-        表名限定由 DBService._resolve_table_qualified_name 自动发现，
-        调用方无需关心表在哪个数据库。
-
-        Args:
-            table_name: 表名
-            data_list: 数据列表
-            unique_keys: 唯一键字段列表
-            db_name: 数据库名称，默认 "lianghua"
-
-        Returns:
-            是否成功提交异步写入任务
-        """
-        try:
-            # 直接传纯表名，upsert_data_with_schema 内部自动发现所在数据库
-            success = submit_async_upsert(
-                table_name=table_name,
-                data_list=data_list,
-                unique_keys=unique_keys or ["symbol"]
-            )
-
-            if success:
-                self.logger.debug(f"成功提交异步写入任务: {table_name}, 数据条数: {len(data_list)}, 库={db_name}")
-            else:
-                self.logger.warning(f"提交异步写入任务失败: {table_name}, 库={db_name}")
-
-            return success
-        except Exception as e:
-            self.logger.error(f"提交异步写入任务时发生异常: {table_name}, 错误: {e}, 库={db_name}")
-            return False
+        """异步写入数据库（兼容代理，实际实现位于 DBService）。"""
+        return get_db_service().write_db_async(
+            table_name=table_name,
+            data_list=data_list,
+            unique_keys=unique_keys,
+            db_name=db_name
+        )
 
     def write_db_sync(self, table_name: str, data_list: List[Dict[str, Any]], db_name: str = "lianghua") -> bool:
-        """
-        同步写入数据库
-
-        db_name 仅用于选择连接池（"news_data" 使用独立连接池），
-        表名限定由 DBService._resolve_table_qualified_name 自动发现。
-
-        Args:
-            table_name: 表名
-            data_list: 数据列表
-            db_name: 数据库名称，默认 "lianghua"
-
-        Returns:
-            是否成功写入
-        """
-        try:
-            # 直接传纯表名，simple_upsert → upsert_data_with_schema 内部自动发现
-            result = simple_upsert(
-                table_name=table_name,
-                data_list=data_list
-            )
-
-            success = result.get("success", False)
-
-            if success:
-                self.logger.debug(f"成功同步写入数据库: {table_name}, 数据条数: {len(data_list)}, 库={db_name}")
-            else:
-                self.logger.warning(f"同步写入数据库失败: {table_name}, 错误: {result.get('message', '未知错误')}, 库={db_name}")
-
-            return success
-        except Exception as e:
-            self.logger.error(f"同步写入数据库时发生异常: {table_name}, 错误: {e}, 库={db_name}")
-            return False
+        """同步写入数据库（兼容代理，实际实现位于 DBService）。"""
+        return get_db_service().write_db_sync(
+            table_name=table_name,
+            data_list=data_list,
+            db_name=db_name
+        )
 
     # ====================== 查库 =======================
 
@@ -459,12 +355,12 @@ class BaseStockService(RedisServiceBase):
                     if isinstance(data, dict) and data.get("empty") is True:
                         self.logger.info(f"Redis缓存命中(空缓存标记): {cache_key}")
                         return success_result(
-                            message="数据获取成功（来自Redis缓存）",
+                            message="数据获取成功（Redis缓存）",
                             data=[]
                         )
                     self.logger.info(f"Redis缓存命中: {cache_key}")
                     return success_result(
-                        message="数据获取成功（来自Redis缓存）",
+                        message="数据获取成功（Redis缓存）",
                         data=data
                     )
                 except json.JSONDecodeError:
