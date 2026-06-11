@@ -1,0 +1,239 @@
+/* ── 页面视口固定布局 ──────────────────────────────────── */
+
+/* 页面容器：填满视口，flex 纵向布局，禁止外部滚动 */
+.page-layout {
+  height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 内容弹性区域：填满剩余空间，隐藏溢出 */
+.page-layout .flex-content {
+  flex: 1;
+  overflow: hidden;
+  min-height: 0; /* flexbox 溢出收缩 */
+}
+
+/* 内容弹性区域中的 Tabs：填满父容器 */
+.page-layout .flex-content .ant-tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-layout .flex-content .ant-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  overflow: hidden;
+}
+
+.page-layout .flex-content .ant-tabs .ant-tabs-content {
+  height: 100%;
+}
+
+.page-layout .flex-content .ant-tabs .ant-tabs-tabpane {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 表格容器：填满 tab 内容区 */
+.page-layout .table-wrapper {
+  height: 100%;
+}
+
+/* 涨停池：固定数据框高度，分页器始终留在底部，超出数据只在表格内部滚动 */
+.limit-up-page .limit-up-table-box {
+  padding: 0 0 4px;
+}
+
+.limit-up-page .limit-up-table-box .ant-tabs-nav {
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+.limit-up-page .limit-up-table-box .ant-spin-nested-loading,
+.limit-up-page .limit-up-table-box .ant-spin-container,
+.limit-up-page .limit-up-table {
+  height: 100%;
+}
+
+.limit-up-page .limit-up-table {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.limit-up-page .limit-up-table > .ant-table {
+  flex: 1;
+  min-height: 0;
+}
+
+.limit-up-page .limit-up-table .ant-table-body {
+  height: var(--limit-up-scroll-y);
+  min-height: var(--limit-up-scroll-y);
+}
+
+.limit-up-page .limit-up-table .ant-table-placeholder .ant-table-cell {
+  height: var(--limit-up-scroll-y);
+}
+
+.limit-up-page .limit-up-table .ant-table-pagination {
+  margin: 8px 0 0;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+/* 行情与K线：参考涨停池固定表体高度，分页器保留在底部，数据直接显示不做入场动画 */
+.kline-page .kline-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.kline-page .ant-spin-nested-loading,
+.kline-page .ant-spin-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.kline-page .ant-spin-container::after {
+  display: none;
+}
+
+.kline-page .kline-table-box {
+  flex: 1;
+  min-height: 0;
+}
+
+.kline-page .kline-fixed-table {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.kline-page .kline-fixed-table > .ant-table {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.kline-page .kline-fixed-table .ant-table-container {
+  height: 100%;
+}
+
+.kline-page .kline-fixed-table .ant-table-body {
+  height: var(--kline-scroll-y) !important;
+  min-height: var(--kline-scroll-y);
+  max-height: var(--kline-scroll-y) !important;
+  overflow-y: auto !important;
+}
+
+.kline-page .kline-fixed-table .ant-table-placeholder .ant-table-cell {
+  height: var(--kline-scroll-y);
+}
+
+.kline-page .kline-fixed-table .ant-table-tbody,
+.kline-page .kline-fixed-table .ant-table-tbody > tr,
+.kline-page .kline-fixed-table .ant-table-tbody > tr > td,
+.kline-page .kline-fixed-table .ant-table-row,
+.kline-page .kline-fixed-table .ant-table-cell {
+  animation: none !important;
+  transition: none !important;
+  transition-delay: 0s !important;
+  animation-delay: 0s !important;
+}
+
+.kline-page .kline-fixed-table .ant-table-pagination {
+  margin: 8px 0 0;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+/* 融资融券：禁用表格行入场逐条动画，一次性渲染 */
+.margin-trade-page .ant-table-tbody,
+.margin-trade-page .ant-table-tbody > tr,
+.margin-trade-page .ant-table-tbody > tr > td,
+.margin-trade-page .ant-table-row,
+.margin-trade-page .ant-table-cell {
+  animation: none !important;
+  transition: none !important;
+  transition-delay: 0s !important;
+  animation-delay: 0s !important;
+}
+
+/* 融资融券：分页器置底 + 表格行高紧凑压缩 */
+.margin-trade-page .margin-trade-tab-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.margin-trade-page .margin-trade-tab-pane .ant-spin-nested-loading,
+.margin-trade-page .margin-trade-tab-pane .ant-spin-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.margin-trade-page .margin-trade-tab-pane .ant-spin-container::after {
+  display: none;
+}
+
+/* Table wrapper 占满 Tab 剩余空间，内部 Table 由 scroll.y 控制表体高度，
+   分页器固定在底部不收缩 */
+.margin-trade-page .ant-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.margin-trade-page .ant-table-wrapper > .ant-spin-nested-loading,
+.margin-trade-page .ant-table-wrapper > .ant-spin-nested-loading > .ant-spin-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 表格容器 flex: 1，把分页器挤到下方；表体由 scroll.y 限定高度 */
+.margin-trade-page .ant-table-wrapper .ant-spin-container > .ant-table {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 分页器置底（pagination.position=['bottomRight']）固定不收缩 */
+.margin-trade-page .ant-table-wrapper .ant-pagination.ant-table-pagination,
+.margin-trade-page .ant-table-wrapper .ant-pagination.ant-table-pagination-bottom {
+  margin: 8px 0 12px 0 !important;
+  padding: 0 4px;
+  flex-shrink: 0;
+  background: transparent;
+  display: flex !important;
+  min-height: 32px;
+}
+
+/* 表格行高紧凑：默认 small 是 ~38px，这里再压到 28px */
+.margin-trade-page .ant-table-small .ant-table-thead > tr > th {
+  padding: 4px 8px !important;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.margin-trade-page .ant-table-small .ant-table-tbody > tr > td {
+  padding: 3px 8px !important;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.margin-trade-page .ant-table-small .ant-table-tbody > tr {
+  height: auto;
+}
